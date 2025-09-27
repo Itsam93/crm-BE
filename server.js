@@ -20,14 +20,12 @@ import memberRoutes from "./routes/memberRoutes.js";
 import partnershipRoutes from "./routes/partnershipRoutes.js";
 import givingRoutes from "./routes/givingRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
-import reportRoutes from "./routes/reportRoutes.js"; // new
+import reportRoutes from "./routes/reportRoutes.js"; 
 import { notFound, errorHandler } from "./middleware/errorMiddleware.js";
 
 import User from "./models/User.js";
 
-// ----------------------
-// Database connection
-// ----------------------
+
 const startServer = async () => {
   try {
     await connectDB(process.env.MONGO_URI);
@@ -41,15 +39,12 @@ const startServer = async () => {
 const app = express();
 const httpServer = createServer(app);
 
-// ----------------------
-// Socket.IO
-// ----------------------
 const io = new Server(httpServer, {
   cors: {
     origin: [
       "http://localhost:5173",
       "http://localhost:3000",
-      process.env.FRONTEND_URL,
+      "https://crm-app-wheat.vercel.app",
     ],
     credentials: true,
   },
@@ -62,30 +57,32 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => console.log("⚡ Client disconnected:", socket.id));
 });
 
-// ----------------------
-// Middleware
-// ----------------------
 app.use(helmet());
 
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  process.env.FRONTEND_URL,
+  "https://crm-app-wheat.vercel.app",
 ];
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
+      if (!origin) return callback(null, true); 
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
       } else {
         console.error("❌ CORS blocked origin:", origin);
-        callback(new Error("Not allowed by CORS"));
+        return callback(new Error("Not allowed by CORS"));
       }
     },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
 );
+
+app.options("*", cors());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -95,19 +92,13 @@ if (process.env.NODE_ENV !== "production") {
   app.use(morgan("dev"));
 }
 
-// ----------------------
-// Rate limiting
-// ----------------------
 const limiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
+  windowMs: 1 * 60 * 1000, 
   max: 200,
   message: "Too many requests from this IP, please try again later.",
 });
 app.use(limiter);
 
-// ----------------------
-// API Routes
-// ----------------------
 app.use("/api/auth", authRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/churches", churchRoutes);
@@ -115,16 +106,12 @@ app.use("/api/members", memberRoutes);
 app.use("/api/partnerships", partnershipRoutes);
 app.use("/api/givings", givingRoutes);
 app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/reports", reportRoutes); // new route
+app.use("/api/reports", reportRoutes);
 
-// Health check
 app.get("/api/health", (req, res) =>
   res.json({ ok: true, env: process.env.NODE_ENV })
 );
 
-// ----------------------
-// Serve frontend (production)
-// ----------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -137,15 +124,9 @@ if (process.env.NODE_ENV === "production") {
   );
 }
 
-// ----------------------
-// Error handlers
-// ----------------------
 app.use(notFound);
 app.use(errorHandler);
 
-// ----------------------
-// Seed admin user (hashed password)
-// ----------------------
 const seedAdminIfNeeded = async () => {
   try {
     const existingAdmin = await User.findOne({
@@ -154,7 +135,7 @@ const seedAdminIfNeeded = async () => {
     if (!existingAdmin) {
       const adminUser = new User({
         username: process.env.ADMIN_USERNAME || "admin",
-        password: process.env.ADMIN_PASSWORD || "admin123", // pre-save hook hashes
+        password: process.env.ADMIN_PASSWORD || "admin123",
         role: "admin",
       });
 
@@ -168,9 +149,6 @@ const seedAdminIfNeeded = async () => {
   }
 };
 
-// ----------------------
-// Start server
-// ----------------------
 const PORT = process.env.PORT || 5000;
 
 httpServer.listen(PORT, async () => {
