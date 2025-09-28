@@ -2,7 +2,7 @@ import asyncHandler from "express-async-handler";
 import Giving from "../models/Giving.js";
 import Member from "../models/Member.js";
 import Partnership from "../models/Partnership.js";
-import Church from "../models/Church.js"; // assuming you have a Church model
+import Church from "../models/Church.js"; 
 
 // @desc Add new giving
 // @route POST /api/givings

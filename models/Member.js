@@ -12,7 +12,7 @@ const memberSchema = new mongoose.Schema(
       required: true,
     },
     designation: {
-      type: [String], // allows multiple designations e.g., ["Bro", "Sis"]
+      type: [String], 
       enum: ["Pastor", "Deacon", "Deaconness", "Bro", "Sis"],
       default: [],
     },

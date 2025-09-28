@@ -1,121 +1,93 @@
-import multer from "multer";
-import XLSX from "xlsx";
+import xlsx from "xlsx";
+import fs from "fs";
+import path from "path";
 import Member from "../models/Member.js";
-import Group from "../models/Group.js";
 import Church from "../models/Church.js";
+import Group from "../models/Group.js";
 import Partnership from "../models/Partnership.js";
 import Giving from "../models/Giving.js";
 
-// Multer setup (memory storage)
-const storage = multer.memoryStorage();
+
+import multer from "multer";
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, Date.now() + "-" + file.originalname),
+});
 export const upload = multer({ storage });
 
-// Convert Excel date or string to JS Date
-const parseDate = (date) => {
-  if (!date) return new Date();
-  if (typeof date === "number") return new Date((date - 25569) * 86400 * 1000); // Excel serial
-  if (typeof date === "string") {
-    // Convert DD/MM/YYYY to YYYY-MM-DD
-    if (date.includes("/")) {
-      const [d, m, y] = date.split("/");
-      return new Date(`${y}-${m}-${d}`);
-    }
-    return new Date(date); // YYYY-MM-DD
-  }
-  return new Date();
-};
-
-// Controller
 export const uploadGivings = async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
-
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-
-    // Convert sheet to JSON
-    let rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-
-    if (!rows.length) return res.status(400).json({ message: "Excel sheet is empty" });
-
-    const failedRows = [];
-
-    for (const [index, row] of rows.entries()) {
-      try {
-        // Map headers flexibly (trim & lower case)
-        const map = {};
-        for (const key of Object.keys(row)) {
-          map[key.trim().toLowerCase()] = row[key];
-        }
-
-        const member_name = map["member name"]?.toString().trim() || null;
-        const church_name = map["church name"]?.toString().trim() || null;
-        const group_name = map["group name"]?.toString().trim() || null;
-        const partnership_name = map["partnership arm"]?.toString().trim() || null;
-        let amountRaw = map["amount"];
-        const dateRaw = map["date"];
-
-        // Validate mandatory fields
-        if (!church_name || !amountRaw) {
-          failedRows.push({ row: index + 2, reason: "Missing Church Name or Amount" });
-          continue;
-        }
-
-        // Parse amount (remove commas, currency symbols)
-        amountRaw = amountRaw.toString().replace(/[^0-9.-]+/g, "");
-        const amount = Number(amountRaw);
-        if (isNaN(amount)) {
-          failedRows.push({ row: index + 2, reason: "Invalid Amount" });
-          continue;
-        }
-
-        const date = parseDate(dateRaw);
-
-        // Find or create Group
-        const group = group_name
-          ? await Group.findOne({ name: group_name }) || await Group.create({ name: group_name })
-          : null;
-
-        // Find or create Church
-        const church = await Church.findOne({ name: church_name }) || await Church.create({ name: church_name });
-
-        // Find or create Partnership
-        const partnership = partnership_name
-          ? await Partnership.findOne({ name: partnership_name }) || await Partnership.create({ name: partnership_name })
-          : null;
-
-        // Find or create Member
-        const member = member_name
-          ? await Member.findOne({ name: member_name }) || await Member.create({
-              name: member_name,
-              group: group?._id || null,
-              church: church?._id || null,
-            })
-          : null;
-
-        // Create Giving
-        await Giving.create({
-          member: member?._id || null,
-          group: group?._id || null,
-          church: church?._id || null,
-          partnership: partnership?._id || null,
-          amount,
-          date,
-        });
-
-      } catch (rowErr) {
-        failedRows.push({ row: index + 2, reason: rowErr.message });
-      }
+    if (!req.file) {
+      return res.status(400).json({ message: "Please upload an Excel file" });
     }
 
-    res.json({
-      message: `Givings upload completed. Failed rows: ${failedRows.length}`,
-      failedRows,
-    });
+    // Read the Excel file
+    const filePath = path.resolve(req.file.path);
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
+    let results = [];
+
+    for (let row of sheetData) {
+      const {
+        "Member Name": memberName,
+        "Church Name": churchName,
+        "Group Name": groupName,
+        "Partnership Arm": partnershipName,
+        Amount,
+        Date,
+      } = row;
+
+      if (!memberName || !churchName || !groupName || !partnershipName || !Amount) {
+        results.push({ row, status: "❌ Skipped (Missing required fields)" });
+        continue;
+      }
+
+      // Ensure Group
+      let group = await Group.findOne({ group_name: groupName });
+      if (!group) {
+        group = await Group.create({ group_name: groupName });
+      }
+
+      // Ensure Church
+      let church = await Church.findOne({ name: churchName, group: group._id });
+      if (!church) {
+        church = await Church.create({ name: churchName, group: group._id });
+      }
+
+      // Ensure Member
+      let member = await Member.findOne({ name: memberName, church: church._id });
+      if (!member) {
+        member = await Member.create({ name: memberName, church: church._id });
+      }
+
+      // Ensure Partnership
+      let partnership = await Partnership.findOne({ name: partnershipName });
+      if (!partnership) {
+        partnership = await Partnership.create({ name: partnershipName });
+      }
+
+      // Save Giving
+      const giving = await Giving.create({
+        member: member._id,
+        partnershipArm: partnership._id,
+        amount: Amount,
+        date: Date ? new Date(Date) : new Date(),
+      });
+
+      results.push({ row, status: "✅ Saved", id: giving._id });
+    }
+
+    // Delete uploaded file after processing
+    fs.unlinkSync(filePath);
+
+    res.status(200).json({
+      message: "Upload completed",
+      results,
+    });
   } catch (err) {
-    console.error("Upload failed:", err);
-    res.status(500).json({ message: "Failed to process file", error: err.message });
+    console.error("Upload error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
   }
 };
