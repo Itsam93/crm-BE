@@ -108,7 +108,8 @@ export const deleteGiving = asyncHandler(async (req, res) => {
     throw new Error("Giving not found");
   }
 
-  await giving.remove();
+  await Giving.findByIdAndDelete(req.params.id);
+
   res.json({ message: "Giving deleted successfully" });
 });
 
