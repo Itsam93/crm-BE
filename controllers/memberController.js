@@ -1,4 +1,5 @@
 import asyncHandler from "express-async-handler";
+import mongoose from "mongoose";
 import Member from "../models/Member.js";
 import Giving from "../models/Giving.js";
 import Church from "../models/Church.js";
@@ -16,7 +17,7 @@ export const getMembers = asyncHandler(async (req, res) => {
       select: "name group",
       populate: { path: "group", select: "group_name" },
     })
-    .lean({ virtuals: true }); // include avatar virtual
+    .lean({ virtuals: true });
 
   const result = await Promise.all(
     members.map(async (member) => {
@@ -24,7 +25,6 @@ export const getMembers = asyncHandler(async (req, res) => {
         .populate("partnershipArm", "name")
         .lean();
 
-      // Group givings by partnership arm
       const groupedGivings = givings.reduce((acc, g) => {
         const arm = g.partnershipArm ? g.partnershipArm.name : "Unknown";
         if (!acc[arm]) acc[arm] = [];
@@ -52,7 +52,14 @@ export const getMembers = asyncHandler(async (req, res) => {
 // @access  Private
 // ============================
 export const getMemberById = asyncHandler(async (req, res) => {
-  const member = await Member.findById(req.params.id)
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    res.status(400);
+    throw new Error("Invalid member ID format");
+  }
+
+  const member = await Member.findById(id)
     .populate({
       path: "church",
       select: "name group",
@@ -106,7 +113,7 @@ export const addMember = asyncHandler(async (req, res) => {
 
   if (!name || !church || !gender) {
     res.status(400);
-    throw new Error("Member name, gender and church are required");
+    throw new Error("Member name, gender, and church are required");
   }
 
   const member = await Member.create({
@@ -130,13 +137,38 @@ export const addMember = asyncHandler(async (req, res) => {
 // @access  Private
 // ============================
 export const updateMember = asyncHandler(async (req, res) => {
-  const member = await Member.findById(req.params.id);
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    res.status(400);
+    throw new Error("Invalid member ID format");
+  }
+
+  const member = await Member.findById(id);
   if (!member) {
     res.status(404);
     throw new Error("Member not found");
   }
 
-  Object.assign(member, req.body);
+  const allowedUpdates = [
+    "name",
+    "email",
+    "phone",
+    "church",
+    "designation",
+    "gender",
+    "dateOfBirth",
+    "maritalStatus",
+    "weddingAnniversary",
+    "group",
+  ];
+
+  allowedUpdates.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      member[field] = req.body[field];
+    }
+  });
+
   const updatedMember = await member.save();
 
   res.json(updatedMember);
@@ -148,7 +180,14 @@ export const updateMember = asyncHandler(async (req, res) => {
 // @access  Private
 // ============================
 export const deleteMember = asyncHandler(async (req, res) => {
-  const member = await Member.findById(req.params.id);
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    res.status(400);
+    throw new Error("Invalid member ID format");
+  }
+
+  const member = await Member.findById(id);
   if (!member) {
     res.status(404);
     throw new Error("Member not found");
@@ -178,3 +217,4 @@ export const getGroupsWithChurches = asyncHandler(async (req, res) => {
 
   res.json(result);
 });
+// 
