@@ -54,18 +54,26 @@ export const getMembers = asyncHandler(async (req, res) => {
 export const getMemberById = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    res.status(400);
-    throw new Error("Invalid member ID format");
-  }
+  let member = null;
 
-  const member = await Member.findById(id)
-    .populate({
-      path: "church",
-      select: "name group",
-      populate: { path: "group", select: "group_name" },
-    })
-    .lean({ virtuals: true });
+  if (mongoose.Types.ObjectId.isValid(id)) {
+    member = await Member.findById(id)
+      .populate({
+        path: "church",
+        select: "name group",
+        populate: { path: "group", select: "group_name" },
+      })
+      .lean({ virtuals: true });
+  } else {
+    // fallback if _id is stored as string
+    member = await Member.findOne({ _id: id })
+      .populate({
+        path: "church",
+        select: "name group",
+        populate: { path: "group", select: "group_name" },
+      })
+      .lean({ virtuals: true });
+  }
 
   if (!member) {
     res.status(404);
@@ -79,10 +87,7 @@ export const getMemberById = asyncHandler(async (req, res) => {
   const groupedGivings = givings.reduce((acc, g) => {
     const arm = g.partnershipArm ? g.partnershipArm.name : "Unknown";
     if (!acc[arm]) acc[arm] = [];
-    acc[arm].push({
-      amount: g.amount || 0,
-      date: g.date || null,
-    });
+    acc[arm].push({ amount: g.amount || 0, date: g.date || null });
     return acc;
   }, {});
 
@@ -92,6 +97,7 @@ export const getMemberById = asyncHandler(async (req, res) => {
     grandTotal: givings.reduce((sum, g) => sum + (g.amount || 0), 0),
   });
 });
+
 
 // ============================
 // @desc    Add new member
