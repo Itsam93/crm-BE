@@ -1,4 +1,3 @@
-// models/Member.js
 import mongoose from "mongoose";
 
 const memberSchema = new mongoose.Schema(
@@ -12,7 +11,7 @@ const memberSchema = new mongoose.Schema(
       required: true,
     },
     designation: {
-      type: [String], 
+      type: [String],
       enum: ["Pastor", "Deacon", "Deaconness", "Bro", "Sis"],
       default: [],
     },
@@ -20,6 +19,14 @@ const memberSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
     },
+
+    dateOfBirth: { type: Date },
+    maritalStatus: {
+      type: String,
+      enum: ["Single", "Married", "Widowed", "Divorced"],
+      default: "Single",
+    },
+    weddingAnniversary: { type: Date },
   },
   { timestamps: true }
 );
