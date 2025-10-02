@@ -14,9 +14,9 @@ export const getMembers = asyncHandler(async (req, res) => {
     .populate({
       path: "church",
       select: "name group",
-      populate: { path: "group", select: "group_name" }, 
+      populate: { path: "group", select: "group_name" },
     })
-    .lean();
+    .lean({ virtuals: true }); // include avatar virtual
 
   const result = await Promise.all(
     members.map(async (member) => {
@@ -24,13 +24,20 @@ export const getMembers = asyncHandler(async (req, res) => {
         .populate("partnershipArm", "name")
         .lean();
 
+      // Group givings by partnership arm
+      const groupedGivings = givings.reduce((acc, g) => {
+        const arm = g.partnershipArm ? g.partnershipArm.name : "Unknown";
+        if (!acc[arm]) acc[arm] = [];
+        acc[arm].push({
+          amount: g.amount || 0,
+          date: g.date || null,
+        });
+        return acc;
+      }, {});
+
       return {
         ...member,
-        givings: givings.map((g) => ({
-          partnershipArm: g.partnershipArm ? g.partnershipArm.name : "Unknown",
-          totalAmount: g.amount || 0,
-          date: g.date || null,
-        })),
+        givings: groupedGivings,
         grandTotal: givings.reduce((sum, g) => sum + (g.amount || 0), 0),
       };
     })
@@ -39,9 +46,11 @@ export const getMembers = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-// @desc    Get a single member with givings
+// ============================
+// @desc    Get a single member with grouped givings
 // @route   GET /api/members/:id
 // @access  Private
+// ============================
 export const getMemberById = asyncHandler(async (req, res) => {
   const member = await Member.findById(req.params.id)
     .populate({
@@ -49,7 +58,7 @@ export const getMemberById = asyncHandler(async (req, res) => {
       select: "name group",
       populate: { path: "group", select: "group_name" },
     })
-    .lean();
+    .lean({ virtuals: true });
 
   if (!member) {
     res.status(404);
@@ -60,17 +69,22 @@ export const getMemberById = asyncHandler(async (req, res) => {
     .populate("partnershipArm", "name")
     .lean();
 
+  const groupedGivings = givings.reduce((acc, g) => {
+    const arm = g.partnershipArm ? g.partnershipArm.name : "Unknown";
+    if (!acc[arm]) acc[arm] = [];
+    acc[arm].push({
+      amount: g.amount || 0,
+      date: g.date || null,
+    });
+    return acc;
+  }, {});
+
   res.json({
     ...member,
-    givings: givings.map((g) => ({
-      partnershipArm: g.partnershipArm ? g.partnershipArm.name : "Unknown",
-      totalAmount: g.amount,
-      date: g.date,
-    })),
-    grandTotal: givings.reduce((sum, g) => sum + g.amount, 0),
+    givings: groupedGivings,
+    grandTotal: givings.reduce((sum, g) => sum + (g.amount || 0), 0),
   });
 });
-
 
 // ============================
 // @desc    Add new member
@@ -78,11 +92,21 @@ export const getMemberById = asyncHandler(async (req, res) => {
 // @access  Private
 // ============================
 export const addMember = asyncHandler(async (req, res) => {
-  const { name, email, phone, church, designation } = req.body;
+  const {
+    name,
+    email,
+    phone,
+    church,
+    designation,
+    gender,
+    dateOfBirth,
+    maritalStatus,
+    weddingAnniversary,
+  } = req.body;
 
-  if (!name || !church) {
+  if (!name || !church || !gender) {
     res.status(400);
-    throw new Error("Member name and church are required");
+    throw new Error("Member name, gender and church are required");
   }
 
   const member = await Member.create({
@@ -91,6 +115,10 @@ export const addMember = asyncHandler(async (req, res) => {
     phone,
     church,
     designation: designation || [],
+    gender,
+    dateOfBirth,
+    maritalStatus,
+    weddingAnniversary,
   });
 
   res.status(201).json(member);
@@ -115,7 +143,7 @@ export const updateMember = asyncHandler(async (req, res) => {
 });
 
 // ============================
-// @desc    Delete a member (and optionally their givings)
+// @desc    Delete a member and related givings
 // @route   DELETE /api/members/:id
 // @access  Private
 // ============================
@@ -127,8 +155,8 @@ export const deleteMember = asyncHandler(async (req, res) => {
   }
 
   await Giving.deleteMany({ member: member._id });
-
   await member.deleteOne();
+
   res.json({ message: "Member removed successfully" });
 });
 
