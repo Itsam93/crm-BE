@@ -74,45 +74,48 @@ export const getMembers = asyncHandler(async (req, res) => {
 });
 
 // ============================
-// @desc    Get a single member
+// @desc    Get a single member with givings
 // @route   GET /api/members/:id
 // @access  Private
 // ============================
 export const getMemberById = asyncHandler(async (req, res) => {
-  try {
-    const { id } = req.params;
-    const member = await findMemberById(id);
+  const { id } = req.params;
 
-    if (!member) {
-      return res.status(404).json({ success: false, error: "Member not found" });
-    }
+  // Fetch member with church and group populated
+  const member = await Member.findById(id)
+    .populate({
+      path: "church",
+      select: "name group",
+      populate: { path: "group", select: "group_name" },
+    })
+    .lean();
 
-    const givings = await Giving.find({ member: member._id })
-      .populate("partnershipArm", "name")
-      .lean();
-
-    const groupedGivings = givings.reduce((acc, g) => {
-      const arm = g.partnershipArm ? g.partnershipArm.name : "Unknown";
-      if (!acc[arm]) acc[arm] = [];
-      acc[arm].push({
-        amount: g.amount || 0,
-        date: g.date || null,
-      });
-      return acc;
-    }, {});
-
-    res.json({
-      success: true,
-      data: {
-        ...member,
-        givings: groupedGivings,
-        grandTotal: givings.reduce((sum, g) => sum + (g.amount || 0), 0),
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: "Server error" });
+  if (!member) {
+    res.status(404);
+    throw new Error("Member not found");
   }
+
+  // Fetch givings for the member
+  const givings = await Giving.find({ member: id })
+    .populate("partnershipArm", "name")
+    .select("amount date partnershipArm")
+    .sort({ date: -1 }) // Latest first
+    .lean();
+
+  // Calculate grand total
+  const grandTotal = givings.reduce((sum, g) => sum + (g.amount || 0), 0);
+
+  // Attach givings and grand total to member object
+  member.givings = givings;
+  member.grandTotal = grandTotal;
+
+  res.json({
+    success: true,
+    data: member,
+  });
 });
+
+
 
 // ============================
 // @desc    Add new member
