@@ -6,7 +6,6 @@ import Church from "../models/Church.js";
 
 // @desc Add new giving
 // @route POST /api/givings
-// @access Public/Protected
 export const addGiving = asyncHandler(async (req, res) => {
   const { member, partnershipArm, amount, date } = req.body;
 
@@ -52,6 +51,35 @@ export const getGivings = asyncHandler(async (req, res) => {
     .populate("partnershipArm", "name");
 
   res.json(givings);
+});
+
+// @desc Get all givings for a specific member
+// @route GET /api/givings/member/:id
+export const getGivingsByMember = asyncHandler(async (req, res) => {
+  const memberId = req.params.id;
+
+  const member = await Member.findById(memberId)
+    .populate("church", "name")
+    .lean(); 
+
+  if (!member) {
+    res.status(404);
+    throw new Error("Member not found");
+  }
+
+  const givings = await Giving.find({ member: memberId })
+    .populate("partnershipArm", "name")
+    .select("amount date partnershipArm")
+    .sort({ date: 1 })
+    .lean();
+
+  
+  member.givings = givings;
+
+  res.json({
+    success: true,
+    data: member,
+  });
 });
 
 // @desc Update a giving
@@ -109,7 +137,6 @@ export const deleteGiving = asyncHandler(async (req, res) => {
   }
 
   await Giving.findByIdAndDelete(req.params.id);
-
   res.json({ message: "Giving deleted successfully" });
 });
 
@@ -140,8 +167,6 @@ export const getTotalsByMember = asyncHandler(async (req, res) => {
   res.json(totals);
 });
 
-// ==================== NEW REPORTS ENDPOINT ====================
-
 // @desc Get report: total giving, totals by group, totals by partnership
 // @route GET /api/reports
 export const getReport = asyncHandler(async (req, res) => {
@@ -151,13 +176,11 @@ export const getReport = asyncHandler(async (req, res) => {
   if (startDate) match.date = { $gte: new Date(startDate) };
   if (endDate) match.date = { ...match.date, $lte: new Date(endDate) };
 
-  // Total giving
   const totalGiving = await Giving.aggregate([
     { $match: match },
     { $group: { _id: null, total: { $sum: "$amount" } } },
   ]);
 
-  // Totals by group (church)
   const totalsByGroup = await Giving.aggregate([
     { $match: match },
     {
@@ -178,10 +201,15 @@ export const getReport = asyncHandler(async (req, res) => {
       },
     },
     { $unwind: "$church" },
-    { $group: { _id: "$church._id", group_name: { $first: "$church.name" }, total: { $sum: "$amount" } } },
+    {
+      $group: {
+        _id: "$church._id",
+        group_name: { $first: "$church.name" },
+        total: { $sum: "$amount" },
+      },
+    },
   ]);
 
-  // Totals by partnership
   const totalsByPartnership = await Giving.aggregate([
     { $match: match },
     {
@@ -193,7 +221,13 @@ export const getReport = asyncHandler(async (req, res) => {
       },
     },
     { $unwind: "$partnership" },
-    { $group: { _id: "$partnership._id", partnership_name: { $first: "$partnership.name" }, total: { $sum: "$amount" } } },
+    {
+      $group: {
+        _id: "$partnership._id",
+        partnership_name: { $first: "$partnership.name" },
+        total: { $sum: "$amount" },
+      },
+    },
   ]);
 
   res.json({

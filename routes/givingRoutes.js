@@ -2,25 +2,24 @@ import express from "express";
 import {
   addGiving,
   getGivings,
+  getGivingsByMember,  
   getTotalsByMember,
+  getReport,
   updateGiving,
   deleteGiving,
-  getReport, 
 } from "../controllers/givingController.js";
-
-import { uploadGivings, upload } from "../controllers/uploadGivingsController.js";
 
 const router = express.Router();
 
-// Reports & Upload (specific routes first)
-router.get("/reports", getReport);
-router.post("/upload", upload.single("file"), uploadGivings);
+// ===== Givings CRUD =====
+router.post("/", addGiving);          
+router.get("/", getGivings);         
+router.get("/member/:id", getGivingsByMember); 
+router.put("/:id", updateGiving);      
+router.delete("/:id", deleteGiving);   
 
-// CRUD routes
-router.post("/", addGiving);
-router.get("/", getGivings);
+// ===== Reports & Aggregates =====
 router.get("/totals", getTotalsByMember);
-router.put("/:id", updateGiving);
-router.delete("/:id", deleteGiving);
+router.get("/reports", getReport);       
 
 export default router;
