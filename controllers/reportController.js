@@ -11,6 +11,26 @@ import Giving from "../models/Giving.js";
 // Multer setup
 const upload = multer({ dest: "uploads/" });
 
+// Helper: Convert Excel serial or text date to valid JS Date
+function parseExcelDate(value) {
+  if (!value) return new Date();
+
+  // Handle Excel serial date (numeric)
+  if (typeof value === "number") {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // Excel base date
+    return new Date(excelEpoch.getTime() + value * 86400000);
+  }
+
+  // Handle text date (e.g., August_20th,_2025)
+  try {
+    const cleaned = value.replace(/_/g, " ").replace(/,/g, "");
+    const parsed = new Date(cleaned);
+    return isNaN(parsed.getTime()) ? new Date() : parsed;
+  } catch {
+    return new Date();
+  }
+}
+
 // @desc Upload Excel report
 // @route POST /api/reports/upload
 // @access Private/Admin
@@ -51,6 +71,9 @@ export const uploadReport = [
         continue;
       }
 
+      // Parse date correctly (handles Excel serials or text)
+      const parsedDate = parseExcelDate(date);
+
       // Find or create member
       let member = await Member.findOne({ name: memberName });
       if (!member) {
@@ -65,15 +88,16 @@ export const uploadReport = [
         console.log("🤝 Created new partnership:", partnershipName);
       }
 
+      // Allow multiple daily givings — do NOT skip duplicates
       await Giving.create({
         member: member._id,
         partnershipArm: partnership._id,
         amount,
-        date: date ? new Date(date) : new Date(),
+        date: parsedDate,
       });
 
       createdCount++;
-      console.log("✅ Giving created for:", { memberName, partnershipName, amount, date });
+      console.log("✅ Giving created for:", { memberName, partnershipName, amount, date: parsedDate });
     }
 
     // Delete file after processing
