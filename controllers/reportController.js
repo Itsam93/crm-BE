@@ -65,19 +65,6 @@ export const uploadReport = [
         console.log("🤝 Created new partnership:", partnershipName);
       }
 
-      // Check if Giving already exists
-      const exists = await Giving.findOne({
-        member: member._id,
-        partnershipArm: partnership._id,
-        date: date ? new Date(date) : new Date(),
-      });
-
-      if (exists) {
-        console.log("⚠️ Skipping duplicate giving entry for:", memberName);
-        skippedCount++;
-        continue;
-      }
-
       await Giving.create({
         member: member._id,
         partnershipArm: partnership._id,
