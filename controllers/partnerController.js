@@ -225,42 +225,61 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "File contains no rows" });
 
     // -------------------------------
-    // Normalize & validate each record
+    // Detect static & date columns
     // -------------------------------
-    const toInsert = rows
-      .map((row) => {
-        const fullName = String(row.fullName || row["Full Name"] || "").trim();
-        const partnershipArm = normalizeArm(row.partnershipArm || row["Partnership Arm"]);
-        const church = normalizeChurch(row.church || row["Church"]);
-        const group = String(row.group || row["Group"] || "").trim();
-        const zone = normalizeZone(row.zone || row["Zone"]);
-        const amount = Number(row.amount || row["Amount"] || 0);
-        const date = row.date ? new Date(row.date) : new Date();
-        const notes = String(row.notes || row["Notes"] || "").trim();
+    const sample = rows[0];
+    const headers = Object.keys(sample).map((h) => h.trim());
 
-        if (!fullName || !partnershipArm || !amount) return null;
+    // Core columns you have: Name, Church, Group, Arm
+    const staticCols = ["name", "full name", "fullname", "church", "group", "arm"];
+    const dateCols = headers.filter((h) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(h.trim())
+    );
 
-        return {
-          fullName,
-          partnershipArm,
-          church,
-          group,
-          zone,
+    if (!dateCols.length)
+      return res
+        .status(400)
+        .json({ message: "No date columns found. Ensure headers are in YYYY-MM-DD format." });
+
+    // -------------------------------
+    // Transform (melt) wide → long
+    // -------------------------------
+    const melted = [];
+
+    for (const row of rows) {
+      const fullName =
+        row.name || row["Full Name"] || row.fullName || row["fullname"];
+      const church = row.church || row["Church"] || "";
+      const group = row.group || row["Group"] || "";
+      const arm = row.arm || row["Arm"] || "";
+
+      if (!fullName || !arm) continue;
+
+      for (const dateCol of dateCols) {
+        const amount = Number(row[dateCol]);
+        if (!amount || isNaN(amount)) continue;
+
+        melted.push({
+          fullName: String(fullName).trim(),
+          church: String(church).trim(),
+          group: String(group).trim(),
+          partnershipArm: normalizeArm(arm),
           amount,
-          date,
+          date: new Date(dateCol),
           status: "confirmed",
-          notes,
-        };
-      })
-      .filter(Boolean);
+        });
+      }
+    }
 
-    if (!toInsert.length)
-      return res.status(400).json({ message: "No valid rows found" });
+    if (!melted.length)
+      return res
+        .status(400)
+        .json({ message: "No valid giving data found in the file" });
 
     // -------------------------------
     // Save to database
     // -------------------------------
-    const created = await Partner.insertMany(toInsert);
+    const created = await Partner.insertMany(melted);
 
     res.status(201).json({
       message: `${created.length} giving records uploaded successfully`,
@@ -271,6 +290,7 @@ export const bulkUploadPartners = async (req, res) => {
     res.status(500).json({ message: "Failed to upload givings" });
   }
 };
+
 
 /* ============================================================
    GET /api/partners/arm/:armName
