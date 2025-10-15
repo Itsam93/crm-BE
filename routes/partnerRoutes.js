@@ -91,7 +91,7 @@ router.get(
 router.post("/", restrictTo("admin"), addGiving);
 
 // Bulk upload
-router.post("/upload", restrictTo("admin"), upload.single("file"), bulkUploadPartners);
+router.post("/upload", upload.single("file"), restrictTo("admin"), bulkUploadPartners);
 
 // Update giving/partner
 router.put("/:id", restrictTo("admin"), updatePartner);
