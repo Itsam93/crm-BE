@@ -201,7 +201,7 @@ export const bulkUploadPartners = async (req, res) => {
     let rows = [];
 
     // -------------------------------
-    // Read file
+    // Read uploaded file (CSV / Excel)
     // -------------------------------
     if (ext === "csv") {
       const bufferStream = new stream.PassThrough();
@@ -221,8 +221,56 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "Unsupported file type" });
     }
 
-    if (!rows.length) return res.status(400).json({ message: "File contains no rows" });
+    if (!rows.length)
+      return res.status(400).json({ message: "File contains no rows" });
 
+    // -------------------------------
+    // Normalize & validate each record
+    // -------------------------------
+    const toInsert = rows
+      .map((row) => {
+        const fullName = String(row.fullName || row["Full Name"] || "").trim();
+        const partnershipArm = normalizeArm(row.partnershipArm || row["Partnership Arm"]);
+        const church = normalizeChurch(row.church || row["Church"]);
+        const group = String(row.group || row["Group"] || "").trim();
+        const zone = normalizeZone(row.zone || row["Zone"]);
+        const amount = Number(row.amount || row["Amount"] || 0);
+        const date = row.date ? new Date(row.date) : new Date();
+        const notes = String(row.notes || row["Notes"] || "").trim();
+
+        if (!fullName || !partnershipArm || !amount) return null;
+
+        return {
+          fullName,
+          partnershipArm,
+          church,
+          group,
+          zone,
+          amount,
+          date,
+          status: "confirmed",
+          notes,
+        };
+      })
+      .filter(Boolean);
+
+    if (!toInsert.length)
+      return res.status(400).json({ message: "No valid rows found" });
+
+    // -------------------------------
+    // Save to database
+    // -------------------------------
+    const created = await Partner.insertMany(toInsert);
+
+    res.status(201).json({
+      message: `${created.length} giving records uploaded successfully`,
+      data: created.map(formatPartner),
+    });
+  } catch (err) {
+    console.error("bulkUploadPartners error:", err);
+    res.status(500).json({ message: "Failed to upload givings" });
+  }
+};
     // -------------------------------
     // Identify date columns
     // -------------------------------
