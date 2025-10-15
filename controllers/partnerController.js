@@ -279,39 +279,22 @@ export const bulkUploadPartners = async (req, res) => {
 export const getGivingsByArm = async (req, res) => {
   try {
     let { armName } = req.params;
-    const role = req.user?.role || "";
-
     if (!armName || !armName.trim()) {
       return res.status(400).json({ message: "Arm name is required" });
     }
 
     // Normalize arm
-    armName = armName.trim().toLowerCase();
-    const normalizedArm = /healing/i.test(armName)
+    armName = armName.toLowerCase().trim();
+    const normalizedArm = /healing/.test(armName)
       ? "Healing"
-      : /rhapsody/i.test(armName)
+      : /rhapsody/.test(armName)
       ? "Rhapsody"
-      : /ministry/i.test(armName)
+      : /ministry/.test(armName)
       ? "Ministry"
-      : null;
-
-    if (!normalizedArm) {
-      return res.status(400).json({ message: "Invalid partnership arm" });
-    }
-
-    // HOD restriction: force their own arm
-    if (/hod/i.test(role)) {
-      if (
-        (role.toLowerCase().includes("healing") && normalizedArm !== "Healing") ||
-        (role.toLowerCase().includes("rhapsody") && normalizedArm !== "Rhapsody") ||
-        (role.toLowerCase().includes("ministry") && normalizedArm !== "Ministry")
-      ) {
-        return res.status(403).json({ message: "Access denied for this arm" });
-      }
-    }
+      : armName;
 
     // Fetch recent 50 entries for this arm
-    const partners = await Partner.find({ partnershipArm: normalizedArm })
+    const partners = await Partner.find({ partnershipArm: new RegExp(normalizedArm, "i") })
       .sort({ date: -1 })
       .limit(50)
       .lean();

@@ -35,32 +35,18 @@ const upload = multer({
 router.use(protect);
 
 /* ----------------- READ ROUTES ----------------- */
-// list with pagination/filter/search - accessible to admin, viewer, and HODs
-router.get(
-  "/",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getAllPartners
-);
-
-// get single partner by id
-router.get(
-  "/:id",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getPartnerById
-);
-
-// get partners by arm aggregated per member (with pagination qs)
-router.get(
-  "/arm/:armName",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getGivingsByArm
-);
-
 // totals per member (across arms)
 router.get(
   "/totals",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getTotalGivingsPerMember
+);
+
+// top givers
+router.get(
+  "/top/givers",
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
+  getTopGivers
 );
 
 // group summary (by group name)
@@ -77,11 +63,25 @@ router.get(
   getPartnersByChurchOrGroup
 );
 
-// top givers
+// get partners by arm aggregated per member (with pagination qs)
 router.get(
-  "/top/givers",
+  "/arm/:armName",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getTopGivers
+  getGivingsByArm
+);
+
+// list with pagination/filter/search - accessible to admin, viewer, and HODs
+router.get(
+  "/",
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
+  getAllPartners
+);
+
+// get single partner by id (keep this LAST among GET routes)
+router.get(
+  "/:id",
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
+  getPartnerById
 );
 
 /* ----------------- WRITE ROUTES (ADMIN ONLY) ----------------- */
