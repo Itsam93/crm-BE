@@ -178,12 +178,16 @@ export const deletePartner = async (req, res) => {
    ============================================================ */
 export const bulkUploadPartners = async (req, res) => {
   try {
-    if (!req.file || !req.file.buffer) return res.status(400).json({ message: "No file uploaded" });
+    if (!req.file || !req.file.buffer)
+      return res.status(400).json({ message: "No file uploaded" });
 
     const filename = req.file.originalname.toLowerCase();
     const ext = filename.split(".").pop();
     let rows = [];
 
+    // -------------------------------
+    // Read file
+    // -------------------------------
     if (ext === "csv") {
       const bufferStream = new stream.PassThrough();
       bufferStream.end(req.file.buffer);
@@ -204,43 +208,65 @@ export const bulkUploadPartners = async (req, res) => {
 
     if (!rows.length) return res.status(400).json({ message: "File contains no rows" });
 
+    // -------------------------------
+    // Identify date columns
+    // -------------------------------
+    const allColumns = Object.keys(rows[0]);
+    const dateColumns = allColumns.filter((col) => /^\d{4}-\d{2}-\d{2}$/.test(col)); // e.g., 2025-08-01
+
     const toInsert = [];
     const failed = [];
 
-    rows.forEach((r, i) => {
+    // -------------------------------
+    // Transform wide → long
+    // -------------------------------
+    rows.forEach((r, rowIndex) => {
       const fullName = (r.fullName || r.FullName || r.name)?.toString().trim();
-      const church = (r.church || r.Church)?.toString().trim();
-      const group = (r.group || r.Group)?.toString().trim();
-      const zone = (r.zone || r.Zone)?.toString().trim();
+      const church = normalizeChurch(r.church || r.Church);
+      const group = r.group || r.Group || "";
+      const zone = normalizeZone(r.zone || r.Zone);
       const partnershipArm = normalizeArm(r.partnershipArm || r.arm);
-      const amtRaw = r.amount || r.Amount;
-      const amount = amtRaw !== undefined && amtRaw !== "" ? Number(String(amtRaw).replace(/[,₦\s]/g, "")) : null;
-      const date = r.date || new Date();
 
-      if (!fullName || !partnershipArm || amount == null || Number.isNaN(amount)) {
-        failed.push({ row: i + 1, reason: "Missing required fields or invalid amount" });
+      if (!fullName || !partnershipArm) {
+        failed.push({ row: rowIndex + 1, reason: "Missing required fields" });
         return;
       }
 
-      toInsert.push({
-        fullName,
-        church: normalizeChurch(church),
-        group: group || "",
-        zone: normalizeZone(zone),
-        partnershipArm,
-        amount,
-        date: new Date(date),
-        notes: r.notes || "",
+      dateColumns.forEach((dateCol) => {
+        const amtRaw = r[dateCol];
+        const amount =
+          amtRaw !== undefined && amtRaw !== "" ? Number(String(amtRaw).replace(/[,₦\s]/g, "")) : null;
+
+        if (amount == null || Number.isNaN(amount)) return; // skip invalid/missing amounts
+
+        toInsert.push({
+          fullName,
+          church,
+          group,
+          zone,
+          partnershipArm,
+          amount,
+          date: new Date(dateCol),
+          notes: r.notes || "",
+        });
       });
     });
 
+    // -------------------------------
+    // Insert into DB
+    // -------------------------------
     let insertedCount = 0;
     if (toInsert.length) {
       const result = await Partner.insertMany(toInsert, { ordered: false });
       insertedCount = result.length;
     }
 
-    res.json({ success: true, inserted: insertedCount, failedCount: failed.length, failures: failed.slice(0, 30) });
+    res.json({
+      success: true,
+      inserted: insertedCount,
+      failedCount: failed.length,
+      failures: failed.slice(0, 30),
+    });
   } catch (err) {
     console.error("bulkUploadPartners error:", err);
     res.status(500).json({ message: "Failed processing upload", error: err.message });
@@ -253,22 +279,39 @@ export const bulkUploadPartners = async (req, res) => {
 export const getGivingsByArm = async (req, res) => {
   try {
     let { armName } = req.params;
+    const role = req.user?.role || "";
+
     if (!armName || !armName.trim()) {
       return res.status(400).json({ message: "Arm name is required" });
     }
 
     // Normalize arm
-    armName = armName.toLowerCase().trim();
-    const normalizedArm = /healing/.test(armName)
+    armName = armName.trim().toLowerCase();
+    const normalizedArm = /healing/i.test(armName)
       ? "Healing"
-      : /rhapsody/.test(armName)
+      : /rhapsody/i.test(armName)
       ? "Rhapsody"
-      : /ministry/.test(armName)
+      : /ministry/i.test(armName)
       ? "Ministry"
-      : armName;
+      : null;
+
+    if (!normalizedArm) {
+      return res.status(400).json({ message: "Invalid partnership arm" });
+    }
+
+    // HOD restriction: force their own arm
+    if (/hod/i.test(role)) {
+      if (
+        (role.toLowerCase().includes("healing") && normalizedArm !== "Healing") ||
+        (role.toLowerCase().includes("rhapsody") && normalizedArm !== "Rhapsody") ||
+        (role.toLowerCase().includes("ministry") && normalizedArm !== "Ministry")
+      ) {
+        return res.status(403).json({ message: "Access denied for this arm" });
+      }
+    }
 
     // Fetch recent 50 entries for this arm
-    const partners = await Partner.find({ partnershipArm: new RegExp(normalizedArm, "i") })
+    const partners = await Partner.find({ partnershipArm: normalizedArm })
       .sort({ date: -1 })
       .limit(50)
       .lean();
