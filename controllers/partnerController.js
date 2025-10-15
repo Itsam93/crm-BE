@@ -104,7 +104,7 @@ export const createPartner = async (req, res) => {
       fullName: fullName.trim(),
       church: church.trim(),
       group: group?.trim() || "",
-      zone: zone?.trim() || "",
+      zone: zone?.trim() || "North West Zone One",
       partnershipArm: normalizeArm(partnershipArm),
       amount: Number(amount),
       date: date ? new Date(date) : new Date(),
@@ -202,7 +202,7 @@ export const bulkUploadPartners = async (req, res) => {
         return;
       }
 
-      toInsert.push({ fullName, church, group: group || "", zone: zone || "", partnershipArm, amount, date: new Date(date), notes: r.notes || "" });
+      toInsert.push({ fullName, church, group: group || "", zone: zone || "North West Zone One", partnershipArm, amount, date: new Date(date), notes: r.notes || "" });
     });
 
     let insertedCount = 0;

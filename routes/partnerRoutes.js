@@ -38,63 +38,63 @@ router.use(protect);
 // list with pagination/filter/search - accessible to admin, viewer, and HODs
 router.get(
   "/",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getAllPartners
 );
 
 // get single partner by id
 router.get(
   "/:id",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getPartnerById
 );
 
 // get partners by arm aggregated per member (with pagination qs)
 router.get(
   "/arm/:armName",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getGivingsByArm
 );
 
 // totals per member (across arms)
 router.get(
   "/totals",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getTotalGivingsPerMember
 );
 
 // group summary (by group name)
 router.get(
   "/summary/group/:groupName",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getGroupSummary
 );
 
 // partners by church or group (for detailed drilldowns)
 router.get(
   "/by/:type/:value",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getPartnersByChurchOrGroup
 );
 
 // top givers
 router.get(
   "/top/givers",
-  restrictTo("Admin", "Viewer", "HealingHOD", "RhapsodyHOD", "MinistryHOD"),
+  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getTopGivers
 );
 
 /* ----------------- WRITE ROUTES (ADMIN ONLY) ----------------- */
 // create partner
-router.post("/", restrictTo("Admin"), createPartner);
+router.post("/", restrictTo("admin"), createPartner);
 
 // bulk upload CSV/XLSX
-router.post("/upload", restrictTo("Admin"), upload.single("file"), bulkUploadPartners);
+router.post("/upload", restrictTo("admin"), upload.single("file"), bulkUploadPartners);
 
 // update partner
-router.put("/:id", restrictTo("Admin"), updatePartner);
+router.put("/:id", restrictTo("admin"), updatePartner);
 
 // delete partner
-router.delete("/:id", restrictTo("Admin"), deletePartner);
+router.delete("/:id", restrictTo("admin"), deletePartner);
 
 export default router;

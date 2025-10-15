@@ -1,40 +1,50 @@
 import jwt from "jsonwebtoken";
+import User from "../models/userModel.js"; // if you have a User model
 
-/**
- * Protect routes by verifying JWT
- */
-export const protect = (req, res, next) => {
-  const authHeader = req.headers.authorization;
+// Protect routes: verify JWT token
+export const protect = async (req, res, next) => {
+  let token;
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
+  // 1. Check Authorization header
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith("Bearer")
+  ) {
+    token = req.headers.authorization.split(" ")[1];
   }
 
-  const token = authHeader.split(" ")[1];
+  // 2. Check token existence
+  if (!token) {
+    return res.status(401).json({ message: "Not authorized, no token" });
+  }
 
   try {
+    // 3. Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded; // { role: "Admin" | "HealingHOD" | "RhapsodyHOD" | "MinistryHOD" | "Viewer" }
+
+    // 4. Attach user info to request (optional)
+    req.user = {
+      id: decoded.id,
+      role: decoded.role.toLowerCase(), // lowercase for consistent role checking
+    };
+
     next();
   } catch (err) {
-    return res.status(403).json({ message: "Invalid or expired token" });
+    console.error(err);
+    return res.status(401).json({ message: "Not authorized, token failed" });
   }
 };
 
-/**
- * Restrict access to specific roles
- * Usage: restrictTo("Admin") or restrictTo("HealingHOD", "RhapsodyHOD")
- */
-export const restrictTo = (...allowedRoles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
+// Restrict access to specific roles (case-insensitive)
+export const restrictTo = (...roles) => (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Not authenticated" });
+  }
 
-    if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Access denied" });
-    }
+  const allowedRoles = roles.map((r) => r.toLowerCase());
+  if (!allowedRoles.includes(req.user.role)) {
+    return res.status(403).json({ message: "Access denied" });
+  }
 
-    next();
-  };
+  next();
 };

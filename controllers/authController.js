@@ -18,27 +18,27 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ message: "Password is required" });
     }
 
-    let role = null;
+    // Map passwords to roles (all lowercase for consistency)
+    const roleMap = {
+      [ADMIN_PASSWORD]: "admin",
+      [VIEWER_PASSWORD]: "viewer",
+      [HEALING_HOD_PASSWORD]: "healinghod",
+      [RHAPSODY_HOD_PASSWORD]: "rhapsodyhod",
+      [MINISTRY_HOD_PASSWORD]: "ministryhod",
+    };
 
-    // Match password to role
-    if (password === ADMIN_PASSWORD) role = "admin";
-    else if (password === VIEWER_PASSWORD) role = "viewer";
-    else if (password === HEALING_HOD_PASSWORD) role = "healing_hod";
-    else if (password === RHAPSODY_HOD_PASSWORD) role = "rhapsody_hod";
-    else if (password === MINISTRY_HOD_PASSWORD) role = "ministry_hod";
+    const role = roleMap[password];
 
-    // If no match, reject login
     if (!role) {
       console.log("❌ Invalid password attempt");
       return res.status(401).json({ message: "Invalid password" });
     }
 
-    // Generate JWT token
+    // Generate JWT token with role
     const token = jwt.sign({ role }, JWT_SECRET, { expiresIn: "7d" });
 
     console.log(`✅ Login successful for role: ${role}`);
 
-    // ✅ Always return JSON response to avoid 204
     return res.status(200).json({
       message: "Login successful",
       role,
