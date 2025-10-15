@@ -38,7 +38,7 @@ const partnerSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // ✅ New field for specific date of giving
+    // ✅ Field for the specific date of giving
     dateOfGiving: {
       type: Date,
       required: true,
@@ -49,12 +49,6 @@ const partnerSchema = new mongoose.Schema(
       type: String,
       enum: ["confirmed", "pending"],
       default: "confirmed",
-    },
-
-    notes: {
-      type: String,
-      default: "",
-      trim: true,
     },
   },
   { timestamps: true }

@@ -30,7 +30,7 @@ const formatPartner = (p) => ({
   zone: p.zone || "North West Zone One",
   partnershipArm: p.partnershipArm || "Unassigned Arm",
   amount: Number(p.amount || 0),
-  date: p.date || new Date(),
+  dateOfGiving: p.dateOfGiving || new Date(),
   status: p.status || "confirmed",
   notes: p.notes || "",
 });
@@ -112,26 +112,13 @@ export const getPartnerById = async (req, res) => {
    ============================================================ */
 export const addGiving = async (req, res) => {
   try {
-    const {
-      fullName,
-      church,
-      group,
-      zone,
-      partnershipArm,
-      amount,
-      date,
-      status = "confirmed",
-      notes = "",
-    } = req.body;
+    const { fullName, church, group, zone, partnershipArm, amount, dateOfGiving, status = "confirmed", notes = "" } =
+      req.body;
 
-    // Validate required fields
     if (!fullName || !partnershipArm || amount == null || !church) {
-      return res
-        .status(400)
-        .json({ message: "fullName, partnershipArm, church, and amount are required" });
+      return res.status(400).json({ message: "fullName, partnershipArm, church, and amount are required" });
     }
 
-    // Create the giving record
     const giving = await Partner.create({
       fullName: fullName.trim(),
       church: normalizeChurch(church),
@@ -139,7 +126,7 @@ export const addGiving = async (req, res) => {
       zone: normalizeZone(zone),
       partnershipArm: normalizeArm(partnershipArm),
       amount: Number(amount),
-      date: date ? new Date(date) : new Date(),
+      dateOfGiving: dateOfGiving ? new Date(dateOfGiving) : new Date(),
       status,
       notes: notes?.trim() || "",
     });
@@ -163,6 +150,7 @@ export const updatePartner = async (req, res) => {
     if (updates.zone) updates.zone = normalizeZone(updates.zone);
     if (updates.church) updates.church = normalizeChurch(updates.church);
     if (updates.amount != null) updates.amount = Number(updates.amount);
+    if (updates.dateOfGiving) updates.dateOfGiving = new Date(updates.dateOfGiving);
 
     const updated = await Partner.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Partner not found" });
@@ -207,27 +195,31 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "Empty file" });
     }
 
-    // Log detected headers for debugging
-    console.log("Sheet headers:", Object.keys(rawData[0]));
+    console.log("Detected headers:", Object.keys(rawData[0]));
 
-    // Detect date columns (supports multiple formats)
-    const dateColumns = Object.keys(rawData[0]).filter((key) => {
-      const cleaned = key.toString().trim();
-      return (
-        /^\d{4}-\d{2}-\d{2}$/.test(cleaned) || // 2025-08-01
-        /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cleaned) || // 01/08/2025 or 8/1/2025
-        /^[A-Za-z]{3,9}\s?\d{1,2},?\s?\d{2,4}$/.test(cleaned) || // Aug 1, 2025 or August 1 2025
-        /^\d{1,2}-[A-Za-z]{3,9}-\d{2,4}$/.test(cleaned) // 1-Aug-25
-      );
-    });
+    // Known headers
+    const knownHeaders = ["Name", "Church", "Group", "Arm"];
+    const dateColumns = Object.keys(rawData[0]).filter(
+      (key) => !knownHeaders.includes(key)
+    );
 
     if (dateColumns.length === 0) {
       return res.status(400).json({ message: "No date columns detected" });
     }
 
+    // Helper: normalize Excel date headers
     const normalizeDate = (val) => {
-      const d = new Date(val);
+      let d = new Date(val);
       if (!isNaN(d)) return d.toISOString().split("T")[0];
+
+      // Excel serial number
+      const num = Number(val);
+      if (!isNaN(num) && num > 40000 && num < 90000) {
+        const base = new Date(1899, 11, 30);
+        base.setDate(base.getDate() + num);
+        return base.toISOString().split("T")[0];
+      }
+
       return null;
     };
 
@@ -239,19 +231,23 @@ export const bulkUploadPartners = async (req, res) => {
       const group = String(row["Group"] || "").trim();
       const partnershipArm = String(row["Arm"] || "").trim();
 
-      if (!fullName || !church || !partnershipArm) return; // skip incomplete rows
+      if (!fullName || !church || !partnershipArm) return;
 
-      dateColumns.forEach((dateKey) => {
-        const amount = Number(row[dateKey] || 0);
-        const normalizedDate = normalizeDate(dateKey);
-        if (amount > 0 && normalizedDate) {
+      dateColumns.forEach((col) => {
+        let amount = row[col];
+        if (typeof amount === "string") amount = amount.replace(/,/g, "").trim();
+        amount = Number(amount) || 0;
+
+        const date = normalizeDate(col);
+
+        if (amount > 0 && date) {
           melted.push({
             fullName,
             church,
             group,
-            partnershipArm,
+            partnershipArm: normalizeArm(partnershipArm),
             amount,
-            date: normalizedDate,
+            date,
             status: "confirmed",
             notes: "",
           });
@@ -263,7 +259,6 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "No valid giving data found" });
     }
 
-    // Save to MongoDB
     await Partner.insertMany(melted);
 
     res.status(201).json({
@@ -289,7 +284,7 @@ export const getGivingsByArm = async (req, res) => {
       return res.status(400).json({ message: "Arm name is required" });
     }
 
-    // Normalize arm
+    // Normalize arm name
     armName = armName.toLowerCase().trim();
     const normalizedArm = /healing/.test(armName)
       ? "Healing"
@@ -305,14 +300,19 @@ export const getGivingsByArm = async (req, res) => {
       .limit(50)
       .lean();
 
-    const data = partners.map(p => ({
-      name: p.fullName,
+    if (!partners.length) {
+      return res.json({ success: true, data: [], message: "No records found for this arm" });
+    }
+
+    const data = partners.map((p) => ({
+      name: p.fullName || "N/A",
       church: p.church || "Unassigned Church",
-      arm: p.partnershipArm,
-      amount: p.amount,
-      date: p.date,
+      arm: p.partnershipArm || "Unassigned Arm",
+      amount: p.amount || 0,
+      date: p.date ? new Date(p.date).toISOString().split("T")[0] : null,
     }));
 
+    // Prevent caching
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.json({ success: true, data });
   } catch (err) {
@@ -320,6 +320,7 @@ export const getGivingsByArm = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch partners by arm" });
   }
 };
+
 
 
 /* ============================================================
@@ -461,20 +462,22 @@ export const getAdminSummary = async (req, res) => {
       .limit(10)
       .lean();
 
-    // Map fields to frontend-friendly keys
-    const recentMapped = recent.map(r => ({
-      name: r.fullName,
-      church: r.church || "Unassigned Church",
-      arm: r.partnershipArm,
-      amount: r.amount,
-      date: r.date,
-    }));
+    const recentMapped = recent.length
+      ? recent.map((r) => ({
+          name: r.fullName || "N/A",
+          church: r.church || "Unassigned Church",
+          arm: r.partnershipArm || "Unassigned Arm",
+          amount: r.amount || 0,
+          date: r.date ? new Date(r.date).toISOString().split("T")[0] : null,
+        }))
+      : [];
 
     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     res.json({
       success: true,
       summary: { totalPartners, healing, rhapsody, ministry },
       recent: recentMapped,
+      message: recentMapped.length ? "Recent partners fetched successfully" : "No recent records found",
     });
   } catch (err) {
     console.error("getAdminSummary error:", err);
