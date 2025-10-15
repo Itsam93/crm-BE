@@ -435,3 +435,22 @@ export const getPartnersByChurchOrGroup = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch partners by type/value" });
   }
 };
+
+
+export const getAdminSummary = async (req, res) => {
+  try {
+    const totalPartners = await Partner.countDocuments();
+    const healing = await Partner.countDocuments({ partnershipArm: /healing/i });
+    const rhapsody = await Partner.countDocuments({ partnershipArm: /rhapsody/i });
+    const ministry = await Partner.countDocuments({ partnershipArm: /ministry/i });
+    const recent = await Partner.find().sort({ date: -1 }).limit(10).lean();
+
+    res.json({
+      summary: { totalPartners, healing, rhapsody, ministry },
+      recent
+    });
+  } catch (err) {
+    console.error("getAdminSummary error:", err);
+    res.status(500).json({ message: "Failed to fetch admin summary" });
+  }
+};
