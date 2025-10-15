@@ -1,21 +1,20 @@
 import jwt from "jsonwebtoken";
 
-// Load environment variables from .env
-const {
-  ADMIN_PASSWORD,
-  VIEWER_PASSWORD,
-  HEALING_HOD_PASSWORD,
-  RHAPSODY_HOD_PASSWORD,
-  MINISTRY_HOD_PASSWORD,
-  JWT_SECRET,
-} = process.env;
-
-// POST /api/auth/login
 export const loginUser = async (req, res) => {
   try {
     const { password } = req.body;
 
+    const {
+      ADMIN_PASSWORD,
+      VIEWER_PASSWORD,
+      HEALING_HOD_PASSWORD,
+      RHAPSODY_HOD_PASSWORD,
+      MINISTRY_HOD_PASSWORD,
+      JWT_SECRET,
+    } = process.env;
+
     if (!password) {
+      console.log("❌ No password provided");
       return res.status(400).json({ message: "Password is required" });
     }
 
@@ -30,19 +29,23 @@ export const loginUser = async (req, res) => {
 
     // If no match, reject login
     if (!role) {
+      console.log("❌ Invalid password attempt");
       return res.status(401).json({ message: "Invalid password" });
     }
 
     // Generate JWT token
     const token = jwt.sign({ role }, JWT_SECRET, { expiresIn: "7d" });
 
-    res.status(200).json({
+    console.log(`✅ Login successful for role: ${role}`);
+
+    // ✅ Always return JSON response to avoid 204
+    return res.status(200).json({
       message: "Login successful",
       role,
       token,
     });
   } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ message: "Error during login" });
+    console.error("💥 Login error:", error);
+    return res.status(500).json({ message: "Error during login" });
   }
 };
