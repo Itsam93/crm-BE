@@ -197,7 +197,7 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    // Read workbook from buffer
+    // Read Excel workbook
     const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
@@ -207,27 +207,34 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "Empty file" });
     }
 
-    // Identify date columns automatically
-    const dateColumns = Object.keys(rawData[0]).filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key));
+    // Detect date columns (YYYY-MM-DD)
+    const dateColumns = Object.keys(rawData[0]).filter((key) =>
+      /^\d{4}-\d{2}-\d{2}$/.test(key)
+    );
 
     const melted = [];
 
     rawData.forEach((row) => {
-      const base = {
-        name: String(row["Name"] || "").trim(),
-        church: String(row["Church"] || "").trim(),
-        group: String(row["Group"] || "").trim(),
-        arm: String(row["Arm"] || "").trim(),
-      };
+      const fullName = String(row["Name"] || "").trim();
+      const church = String(row["Church"] || "").trim();
+      const group = String(row["Group"] || "").trim();
+      const partnershipArm = String(row["Arm"] || "").trim();
 
-      // Expand each date column as a separate record
+      if (!fullName || !church || !partnershipArm) return; // skip invalid
+
+      // Expand each date into its own record
       dateColumns.forEach((dateKey) => {
         const amount = Number(row[dateKey] || 0);
         if (amount > 0) {
           melted.push({
-            ...base,
-            date: dateKey,
+            fullName,
+            church,
+            group,
+            partnershipArm,
             amount,
+            date: new Date(dateKey),
+            status: "confirmed",
+            notes: "",
           });
         }
       });
@@ -237,18 +244,18 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "No valid giving data found" });
     }
 
-    // Optionally save to MongoDB
+    // Insert into MongoDB
     await Partner.insertMany(melted);
 
-    res.status(200).json({
-      message: "Upload successful",
-      totalRecords: melted.length,
+    res.status(201).json({
+      message: `Upload successful (${melted.length} records)`,
     });
   } catch (err) {
     console.error("Error processing upload:", err);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({ message: err.message || "Internal server error" });
   }
 };
+
 
 
 /* ============================================================
