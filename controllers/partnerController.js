@@ -235,20 +235,81 @@ export const bulkUploadPartners = async (req, res) => {
 /* ============================================================
    GET /api/partners/arm/:arm
    ============================================================ */
+/* ============================================================
+   GET /api/partners/arm/:armName
+   - Aggregated totals per member for a given arm
+   - Handles minor typos, spaces, and trailing numbers
+   ============================================================ */
 export const getGivingsByArm = async (req, res) => {
   try {
-    const { arm } = req.params;
-    if (!arm) return res.status(400).json({ message: "Arm is required" });
+    let { armName } = req.params;
+    const { page = 1, limit = 30, search = "" } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10));
+    const pageSize = Math.max(1, Math.min(200, parseInt(limit, 10)));
+    const skip = (pageNum - 1) * pageSize;
 
-    const normalizedArm = arm.trim();
-    const partners = await Partner.find({ partnershipArm: { $regex: normalizedArm, $options: "i" } }).lean();
+    if (!armName || !armName.trim()) {
+      return res.status(400).json({ message: "Arm is required" });
+    }
 
-    res.json({ success: true, count: partners.length, data: partners });
+    // Normalize arm name to standard format
+    armName = armName
+      .toString()
+      .trim()
+      .replace(/[\d:]/g, "")      // remove numbers or colons
+      .replace(/\s+/g, " ");      // collapse multiple spaces
+
+    const normalizedArm = (() => {
+      if (/healing/i.test(armName)) return "Healing";
+      if (/rhapsody/i.test(armName)) return "Rhapsody";
+      if (/ministry/i.test(armName)) return "Ministry";
+      return armName; // fallback, use original
+    })();
+
+    const role = req.user?.role;
+    if ((role === "HealingHOD" && !/healing/i.test(normalizedArm)) ||
+        (role === "RhapsodyHOD" && !/rhapsody/i.test(normalizedArm)) ||
+        (role === "MinistryHOD" && !/ministry/i.test(normalizedArm))) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const match = { partnershipArm: { $regex: normalizedArm, $options: "i" } };
+    if (search) match.$or = [
+      { fullName: { $regex: search, $options: "i" } },
+      { church: { $regex: search, $options: "i" } },
+    ];
+
+    const agg = [
+      { $match: match },
+      { $group: {
+          _id: "$fullName",
+          fullName: { $first: "$fullName" },
+          church: { $first: "$church" },
+          group: { $first: "$group" },
+          zone: { $first: "$zone" },
+          totalAmount: { $sum: "$amount" },
+          lastDate: { $max: "$date" }
+        }
+      },
+      { $sort: { totalAmount: -1 } },
+      { $skip: skip },
+      { $limit: pageSize },
+    ];
+
+    const [data, totalCountArr] = await Promise.all([
+      Partner.aggregate(agg),
+      Partner.aggregate([{ $match: match }, { $group: { _id: "$fullName" } }, { $count: "count" }])
+    ]);
+
+    const totalItems = totalCountArr[0]?.count || 0;
+
+    res.json({ data, meta: { page: pageNum, limit: pageSize, totalPages: Math.ceil(totalItems / pageSize), totalItems } });
   } catch (err) {
     console.error("getGivingsByArm error:", err);
-    res.status(500).json({ message: "Failed to fetch partners by arm" });
+    res.status(500).json({ message: "Server error fetching givings by arm" });
   }
 };
+
 
 
 /* ============================================================
