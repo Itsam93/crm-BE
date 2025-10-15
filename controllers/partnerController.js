@@ -110,15 +110,29 @@ export const getPartnerById = async (req, res) => {
 /* ============================================================
    POST /api/partners
    ============================================================ */
-export const createPartner = async (req, res) => {
+export const addGiving = async (req, res) => {
   try {
-    const { fullName, church, group, zone, partnershipArm, amount, date, status = "confirmed", notes = "" } = req.body;
+    const {
+      fullName,
+      church,
+      group,
+      zone,
+      partnershipArm,
+      amount,
+      date,
+      status = "confirmed",
+      notes = "",
+    } = req.body;
 
-    if (!fullName || !partnershipArm || amount == null) {
-      return res.status(400).json({ message: "fullName, partnershipArm, and amount are required" });
+    // Validate required fields
+    if (!fullName || !partnershipArm || amount == null || !church) {
+      return res
+        .status(400)
+        .json({ message: "fullName, partnershipArm, church, and amount are required" });
     }
 
-    const doc = await Partner.create({
+    // Create the giving record
+    const giving = await Partner.create({
       fullName: fullName.trim(),
       church: normalizeChurch(church),
       group: group?.trim() || "",
@@ -130,12 +144,13 @@ export const createPartner = async (req, res) => {
       notes: notes?.trim() || "",
     });
 
-    res.status(201).json(formatPartner(doc));
+    res.status(201).json(formatPartner(giving));
   } catch (err) {
-    console.error("createPartner error:", err);
-    res.status(500).json({ message: "Failed to create partner" });
+    console.error("addGiving error:", err);
+    res.status(500).json({ message: "Failed to record giving" });
   }
 };
+
 
 /* ============================================================
    PUT /api/partners/:id

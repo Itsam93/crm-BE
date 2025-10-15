@@ -4,7 +4,7 @@ import path from "path";
 import {
   getAllPartners,
   getPartnerById,
-  createPartner,
+  addGiving, 
   updatePartner,
   deletePartner,
   bulkUploadPartners,
@@ -19,11 +19,11 @@ import { protect, restrictTo } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// Multer setup for file uploads (memory storage)
+// ---------------------- MULTER CONFIG ----------------------
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 }, 
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     if ([".csv", ".xls", ".xlsx"].includes(ext)) cb(null, true);
@@ -34,67 +34,69 @@ const upload = multer({
 // ---------------------- PROTECT ALL ROUTES ----------------------
 router.use(protect);
 
-/* ----------------- READ ROUTES ----------------- */
-// totals per member (across arms)
+/* ---------------------- READ ROUTES ---------------------- */
+
+// Total givings per member (across all arms)
 router.get(
   "/totals",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getTotalGivingsPerMember
 );
 
-// top givers
+// Top givers overall
 router.get(
   "/top/givers",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getTopGivers
 );
 
-// group summary (by group name)
+// Group summary (by group name)
 router.get(
   "/summary/group/:groupName",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getGroupSummary
 );
 
-// partners by church or group (for detailed drilldowns)
+// Partners by church or group (for filtering)
 router.get(
   "/by/:type/:value",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getPartnersByChurchOrGroup
 );
 
-// get partners by arm aggregated per member (with pagination qs)
+// Get givings by partnership arm
 router.get(
   "/arm/:armName",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getGivingsByArm
 );
 
-// list with pagination/filter/search - accessible to admin, viewer, and HODs
+// List all records (with pagination/filter/search)
 router.get(
   "/",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getAllPartners
 );
 
-// get single partner by id (keep this LAST among GET routes)
+// Get single record by ID (keep last)
 router.get(
   "/:id",
   restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
   getPartnerById
 );
 
-/* ----------------- WRITE ROUTES (ADMIN ONLY) ----------------- */
-// create partner
-router.post("/", restrictTo("admin"), createPartner);
+/* ---------------------- WRITE ROUTES (ADMIN ONLY) ---------------------- */
 
-// bulk upload CSV/XLSX
+// ✅ Add new giving (formerly createPartner)
+router.post("/", restrictTo("admin"), addGiving);
+
+// Bulk upload
 router.post("/upload", restrictTo("admin"), upload.single("file"), bulkUploadPartners);
 
-// update partner
+// Update giving/partner
 router.put("/:id", restrictTo("admin"), updatePartner);
 
-// delete partner
+// Delete giving/partner
 router.delete("/:id", restrictTo("admin"), deletePartner);
 
 export default router;
