@@ -112,31 +112,61 @@ export const getPartnerById = async (req, res) => {
    ============================================================ */
 export const addGiving = async (req, res) => {
   try {
-    const { fullName, church, group, zone, partnershipArm, amount, dateOfGiving, status = "confirmed", notes = "" } =
-      req.body;
+    const { partnerId, date, amount } = req.body;
 
-    if (!fullName || !partnershipArm || amount == null || !church) {
-      return res.status(400).json({ message: "fullName, partnershipArm, church, and amount are required" });
+    console.log("=== ADD GIVING INITIATED ===");
+    console.log("Received body:", req.body);
+
+    // Validate inputs
+    if (!partnerId || !amount || !date) {
+      console.warn("Missing required field(s):", { partnerId, amount, date });
+      return res.status(400).json({ message: "Partner ID, date, and amount are required" });
     }
 
-    const giving = await Partner.create({
-      fullName: fullName.trim(),
-      church: normalizeChurch(church),
-      group: group?.trim() || "",
-      zone: normalizeZone(zone),
-      partnershipArm: normalizeArm(partnershipArm),
-      amount: Number(amount),
-      dateOfGiving: dateOfGiving ? new Date(dateOfGiving) : new Date(),
-      status,
-      notes: notes?.trim() || "",
+    // Find partner
+    const partner = await Partner.findById(partnerId);
+    if (!partner) {
+      console.warn(`Partner not found for ID: ${partnerId}`);
+      return res.status(404).json({ message: "Partner not found" });
+    }
+
+    console.log(`Found partner: ${partner.fullName} (${partner._id})`);
+
+    // Log before update
+    console.log("Previous givings count:", partner.givings?.length || 0);
+
+    // Add new giving
+    partner.givings.push({
+      date,
+      amount,
     });
 
-    res.status(201).json(formatPartner(giving));
+    // Optional: Update total amount if you’re tracking it separately
+    partner.amount = (partner.amount || 0) + Number(amount);
+
+    // Save
+    await partner.save();
+
+    console.log("New giving added:", { date, amount });
+    console.log("Updated givings count:", partner.givings.length);
+    console.log("Updated total amount:", partner.amount);
+    console.log("=== ADD GIVING COMPLETED SUCCESSFULLY ===");
+
+    return res.json({
+      message: "Giving added successfully",
+      partner: {
+        id: partner._id,
+        fullName: partner.fullName,
+        amount: partner.amount,
+        totalGivings: partner.givings.length,
+      },
+    });
   } catch (err) {
-    console.error("addGiving error:", err);
-    res.status(500).json({ message: "Failed to record giving" });
+    console.error("❌ ADD GIVING FAILED:", err);
+    return res.status(500).json({ message: "Failed to add giving", error: err.message });
   }
 };
+
 
 
 /* ============================================================
@@ -182,95 +212,119 @@ export const deletePartner = async (req, res) => {
 export const bulkUploadPartners = async (req, res) => {
   try {
     if (!req.file || !req.file.buffer) {
+      console.error("No file uploaded");
       return res.status(400).json({ message: "No file uploaded" });
     }
 
-    // Read Excel workbook
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const rawData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+    console.log("=== BULK UPLOAD INITIATED ===");
+    console.log("File received:", req.file.originalname);
+    console.log("MIME type:", req.file.mimetype);
+    console.log("File size:", req.file.size);
 
-    if (rawData.length === 0) {
-      return res.status(400).json({ message: "Empty file" });
+    const filename = req.file.originalname.toLowerCase();
+    const ext = filename.split(".").pop();
+    let rows = [];
+
+    // Log the file type we’re parsing
+    console.log("Parsing file as:", ext);
+
+    if (ext === "csv") {
+      const bufferStream = new stream.PassThrough();
+      bufferStream.end(req.file.buffer);
+      rows = await new Promise((resolve, reject) => {
+        const data = [];
+        bufferStream
+          .pipe(csvParser())
+          .on("data", (row) => data.push(row))
+          .on("end", () => resolve(data))
+          .on("error", (err) => reject(err));
+      });
+    } else if (ext === "xlsx" || ext === "xls") {
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+      rows = sheet;
+    } else {
+      return res.status(400).json({ message: "Unsupported file format" });
     }
 
-    console.log("Detected headers:", Object.keys(rawData[0]));
+    console.log("Rows parsed:", rows.length);
+    if (!rows.length) {
+      return res.status(400).json({ message: "No data found in file" });
+    }
 
-    // Known headers
-    const knownHeaders = ["Name", "Church", "Group", "Arm"];
-    const dateColumns = Object.keys(rawData[0]).filter(
-      (key) => !knownHeaders.includes(key)
+    // Show a sample of the first row
+    console.log("Sample row keys:", Object.keys(rows[0]));
+    console.log("Sample row values:", rows[0]);
+
+    // Detect and normalize date columns
+    const headers = Object.keys(rows[0]);
+    const moment = (await import("moment")).default;
+    const dateColumns = headers.filter(h =>
+      moment(h, ["YYYY-MM-DD", "M/D/YYYY", "D/M/YYYY"], true).isValid()
     );
 
-    if (dateColumns.length === 0) {
-      return res.status(400).json({ message: "No date columns detected" });
-    }
+    console.log("Detected date columns:", dateColumns);
 
-    // Helper: normalize Excel date headers
-    const normalizeDate = (val) => {
-      let d = new Date(val);
-      if (!isNaN(d)) return d.toISOString().split("T")[0];
-
-      // Excel serial number
-      const num = Number(val);
-      if (!isNaN(num) && num > 40000 && num < 90000) {
-        const base = new Date(1899, 11, 30);
-        base.setDate(base.getDate() + num);
-        return base.toISOString().split("T")[0];
-      }
-
-      return null;
-    };
-
-    const melted = [];
-
-    rawData.forEach((row) => {
-      const fullName = String(row["Name"] || "").trim();
-      const church = String(row["Church"] || "").trim();
-      const group = String(row["Group"] || "").trim();
-      const partnershipArm = String(row["Arm"] || "").trim();
-
-      if (!fullName || !church || !partnershipArm) return;
-
-      dateColumns.forEach((col) => {
-        let amount = row[col];
-        if (typeof amount === "string") amount = amount.replace(/,/g, "").trim();
-        amount = Number(amount) || 0;
-
-        const date = normalizeDate(col);
-
-        if (amount > 0 && date) {
-          melted.push({
-            fullName,
-            church,
-            group,
-            partnershipArm: normalizeArm(partnershipArm),
-            amount,
-            date,
-            status: "confirmed",
-            notes: "",
-          });
-        }
-      });
-    });
-
-    if (melted.length === 0) {
+    if (!dateColumns.length) {
       return res.status(400).json({ message: "No valid giving data found" });
     }
 
-    await Partner.insertMany(melted);
+    const givingData = [];
 
-    res.status(201).json({
-      message: `Upload successful (${melted.length} records)`,
-      totalRecords: melted.length,
-    });
+    for (const row of rows) {
+      for (const date of dateColumns) {
+        const amount = parseFloat(row[date] || 0);
+        if (amount > 0) {
+          givingData.push({
+            fullName: row.Name || row.FullName || "",
+            church: row.Church || "",
+            group: row.Group || "",
+            arm: row.Arm || "",
+            date: moment(date, ["YYYY-MM-DD", "M/D/YYYY", "D/M/YYYY"]).format("YYYY-MM-DD"),
+            amount,
+          });
+        }
+      }
+    }
+
+    console.log("Total giving entries found:", givingData.length);
+
+    if (!givingData.length) {
+      return res.status(400).json({ message: "No valid giving entries detected" });
+    }
+
+    // Save data or merge with existing partners
+    const Partner = (await import("../models/Partner.js")).default;
+
+    for (const g of givingData) {
+      let partner = await Partner.findOne({ fullName: g.fullName, church: g.church });
+      if (!partner) {
+        console.log(`Creating new partner: ${g.fullName}`);
+        partner = new Partner({
+          fullName: g.fullName,
+          church: g.church,
+          group: g.group,
+          partnershipArm: g.arm,
+          givings: [],
+        });
+      }
+
+      partner.givings.push({
+        date: g.date,
+        amount: g.amount,
+      });
+
+      await partner.save();
+    }
+
+    console.log("=== BULK UPLOAD COMPLETED SUCCESSFULLY ===");
+    return res.json({ message: "Upload successful", count: givingData.length });
   } catch (err) {
-    console.error("Error processing upload:", err);
-    res.status(500).json({ message: err.message || "Internal server error" });
+    console.error("Bulk upload failed:", err);
+    return res.status(500).json({ message: "Internal server error", error: err.message });
   }
 };
-
 
 
 
