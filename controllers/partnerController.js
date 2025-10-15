@@ -249,3 +249,81 @@ export const getGivingsByArm = async (req, res) => {
     res.status(500).json({ message: "Failed to fetch partners by arm" });
   }
 };
+
+
+/* ============================================================
+   GET /api/partners/group-summary
+   ============================================================ */
+export const getGroupSummary = async (req, res) => {
+  try {
+    // Example logic: summarize partners by group
+    const summary = await Partner.aggregate([
+      {
+        $group: {
+          _id: "$group",
+          totalAmount: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.json({ success: true, data: summary });
+  } catch (err) {
+    console.error("getGroupSummary error:", err);
+    res.status(500).json({ message: "Failed to fetch group summary" });
+  }
+};
+
+
+/* ============================================================
+   GET /api/partners/totals
+   ============================================================ */
+export const getTotalGivingsPerMember = async (req, res) => {
+  try {
+    const totals = await Partner.aggregate([
+      { $group: { _id: "$fullName", totalAmount: { $sum: "$amount" }, count: { $sum: 1 } } },
+    ]);
+    res.json({ success: true, data: totals });
+  } catch (err) {
+    console.error("getTotalGivingsPerMember error:", err);
+    res.status(500).json({ message: "Failed to fetch totals per member" });
+  }
+};
+
+/* ============================================================
+   GET /api/partners/top/givers
+   ============================================================ */
+export const getTopGivers = async (req, res) => {
+  try {
+    const top = await Partner.aggregate([
+      { $group: { _id: "$fullName", totalAmount: { $sum: "$amount" } } },
+      { $sort: { totalAmount: -1 } },
+      { $limit: 100 },
+    ]);
+    res.json({ success: true, data: top });
+  } catch (err) {
+    console.error("getTopGivers error:", err);
+    res.status(500).json({ message: "Failed to fetch top givers" });
+  }
+};
+
+/* ============================================================
+   GET /api/partners/by/:type/:value
+   ============================================================ */
+export const getPartnersByChurchOrGroup = async (req, res) => {
+  try {
+    const { type, value } = req.params;
+    if (!type || !value) return res.status(400).json({ message: "Type and value are required" });
+
+    const query = {};
+    if (type === "church") query.church = value;
+    else if (type === "group") query.group = value;
+    else return res.status(400).json({ message: "Type must be 'church' or 'group'" });
+
+    const partners = await Partner.find(query).lean();
+    res.json({ success: true, count: partners.length, data: partners });
+  } catch (err) {
+    console.error("getPartnersByChurchOrGroup error:", err);
+    res.status(500).json({ message: "Failed to fetch partners by type/value" });
+  }
+};
