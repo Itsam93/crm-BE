@@ -21,6 +21,20 @@ const normalizeArm = (s) => {
 const normalizeZone = (z) => (z?.trim() || "North West Zone One");
 const normalizeChurch = (c) => (c?.trim() || "Unassigned Church");
 
+// Format partner object consistently
+const formatPartner = (p) => ({
+  id: p._id,
+  fullName: p.fullName || "N/A",
+  church: p.church || "Unassigned Church",
+  group: p.group || "",
+  zone: p.zone || "North West Zone One",
+  partnershipArm: p.partnershipArm || "Unassigned Arm",
+  amount: Number(p.amount || 0),
+  date: p.date || new Date(),
+  status: p.status || "confirmed",
+  notes: p.notes || "",
+});
+
 /* ============================================================
    GET /api/partners
    ============================================================ */
@@ -39,7 +53,7 @@ export const getAllPartners = async (req, res) => {
     if (role === "MinistryHOD") query.partnershipArm = { $regex: /ministry/i };
 
     // Filters
-    if (arm) query.partnershipArm = arm;
+    if (arm) query.partnershipArm = { $regex: normalizeArm(arm), $options: "i" };
     if (zone) query.zone = zone;
     if (church) query.church = church;
 
@@ -61,11 +75,9 @@ export const getAllPartners = async (req, res) => {
       Partner.countDocuments(query),
     ]);
 
-    const totalPages = Math.ceil(totalItems / pageSize) || 1;
-
     res.json({
-      data: items,
-      meta: { page: pageNum, limit: pageSize, totalPages, totalItems },
+      data: items.map(formatPartner),
+      meta: { page: pageNum, limit: pageSize, totalPages: Math.ceil(totalItems / pageSize) || 1, totalItems },
     });
   } catch (err) {
     console.error("getAllPartners error:", err);
@@ -78,15 +90,17 @@ export const getAllPartners = async (req, res) => {
    ============================================================ */
 export const getPartnerById = async (req, res) => {
   try {
-    const p = await Partner.findById(req.params.id);
+    const p = await Partner.findById(req.params.id).lean();
     if (!p) return res.status(404).json({ message: "Partner not found" });
 
     const role = req.user?.role;
-    if (role === "HealingHOD" && !/healing/i.test(p.partnershipArm)) return res.status(403).json({ message: "Access denied" });
-    if (role === "RhapsodyHOD" && !/rhapsody/i.test(p.partnershipArm)) return res.status(403).json({ message: "Access denied" });
-    if (role === "MinistryHOD" && !/ministry/i.test(p.partnershipArm)) return res.status(403).json({ message: "Access denied" });
+    if ((role === "HealingHOD" && !/healing/i.test(p.partnershipArm)) ||
+        (role === "RhapsodyHOD" && !/rhapsody/i.test(p.partnershipArm)) ||
+        (role === "MinistryHOD" && !/ministry/i.test(p.partnershipArm))) {
+      return res.status(403).json({ message: "Access denied" });
+    }
 
-    res.json(p);
+    res.json(formatPartner(p));
   } catch (err) {
     console.error("getPartnerById error:", err);
     res.status(500).json({ message: "Server error" });
@@ -116,7 +130,7 @@ export const createPartner = async (req, res) => {
       notes: notes?.trim() || "",
     });
 
-    res.status(201).json(doc);
+    res.status(201).json(formatPartner(doc));
   } catch (err) {
     console.error("createPartner error:", err);
     res.status(500).json({ message: "Failed to create partner" });
@@ -135,9 +149,10 @@ export const updatePartner = async (req, res) => {
     if (updates.church) updates.church = normalizeChurch(updates.church);
     if (updates.amount != null) updates.amount = Number(updates.amount);
 
-    const updated = await Partner.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const updated = await Partner.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true }).lean();
     if (!updated) return res.status(404).json({ message: "Partner not found" });
-    res.json(updated);
+
+    res.json(formatPartner(updated));
   } catch (err) {
     console.error("updatePartner error:", err);
     res.status(500).json({ message: "Failed to update partner" });
@@ -233,12 +248,7 @@ export const bulkUploadPartners = async (req, res) => {
 };
 
 /* ============================================================
-   GET /api/partners/arm/:arm
-   ============================================================ */
-/* ============================================================
    GET /api/partners/arm/:armName
-   - Aggregated totals per member for a given arm
-   - Handles minor typos, spaces, and trailing numbers
    ============================================================ */
 export const getGivingsByArm = async (req, res) => {
   try {
@@ -248,23 +258,9 @@ export const getGivingsByArm = async (req, res) => {
     const pageSize = Math.max(1, Math.min(200, parseInt(limit, 10)));
     const skip = (pageNum - 1) * pageSize;
 
-    if (!armName || !armName.trim()) {
-      return res.status(400).json({ message: "Arm is required" });
-    }
+    if (!armName?.trim()) return res.status(400).json({ message: "Arm is required" });
 
-    // Normalize arm name to standard format
-    armName = armName
-      .toString()
-      .trim()
-      .replace(/[\d:]/g, "")      // remove numbers or colons
-      .replace(/\s+/g, " ");      // collapse multiple spaces
-
-    const normalizedArm = (() => {
-      if (/healing/i.test(armName)) return "Healing";
-      if (/rhapsody/i.test(armName)) return "Rhapsody";
-      if (/ministry/i.test(armName)) return "Ministry";
-      return armName; // fallback, use original
-    })();
+    const normalizedArm = normalizeArm(armName);
 
     const role = req.user?.role;
     if ((role === "HealingHOD" && !/healing/i.test(normalizedArm)) ||
@@ -287,11 +283,12 @@ export const getGivingsByArm = async (req, res) => {
           church: { $first: "$church" },
           group: { $first: "$group" },
           zone: { $first: "$zone" },
-          totalAmount: { $sum: "$amount" },
-          lastDate: { $max: "$date" }
+          arm: { $first: "$partnershipArm" },
+          amount: { $sum: "$amount" },
+          lastDate: { $max: "$date" },
         }
       },
-      { $sort: { totalAmount: -1 } },
+      { $sort: { amount: -1 } },
       { $skip: skip },
       { $limit: pageSize },
     ];
@@ -303,88 +300,20 @@ export const getGivingsByArm = async (req, res) => {
 
     const totalItems = totalCountArr[0]?.count || 0;
 
-    res.json({ data, meta: { page: pageNum, limit: pageSize, totalPages: Math.ceil(totalItems / pageSize), totalItems } });
+    res.json({
+      data: data.map(d => ({
+        name: d.fullName,
+        church: d.church,
+        arm: d.arm,
+        amount: d.amount,
+        date: d.lastDate,
+        group: d.group,
+        zone: d.zone,
+      })),
+      meta: { page: pageNum, limit: pageSize, totalPages: Math.ceil(totalItems / pageSize), totalItems }
+    });
   } catch (err) {
     console.error("getGivingsByArm error:", err);
     res.status(500).json({ message: "Server error fetching givings by arm" });
-  }
-};
-
-
-
-/* ============================================================
-   GET /api/partners/group-summary
-   ============================================================ */
-export const getGroupSummary = async (req, res) => {
-  try {
-    // Example logic: summarize partners by group
-    const summary = await Partner.aggregate([
-      {
-        $group: {
-          _id: "$group",
-          totalAmount: { $sum: "$amount" },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
-
-    res.json({ success: true, data: summary });
-  } catch (err) {
-    console.error("getGroupSummary error:", err);
-    res.status(500).json({ message: "Failed to fetch group summary" });
-  }
-};
-
-
-/* ============================================================
-   GET /api/partners/totals
-   ============================================================ */
-export const getTotalGivingsPerMember = async (req, res) => {
-  try {
-    const totals = await Partner.aggregate([
-      { $group: { _id: "$fullName", totalAmount: { $sum: "$amount" }, count: { $sum: 1 } } },
-    ]);
-    res.json({ success: true, data: totals });
-  } catch (err) {
-    console.error("getTotalGivingsPerMember error:", err);
-    res.status(500).json({ message: "Failed to fetch totals per member" });
-  }
-};
-
-/* ============================================================
-   GET /api/partners/top/givers
-   ============================================================ */
-export const getTopGivers = async (req, res) => {
-  try {
-    const top = await Partner.aggregate([
-      { $group: { _id: "$fullName", totalAmount: { $sum: "$amount" } } },
-      { $sort: { totalAmount: -1 } },
-      { $limit: 100 },
-    ]);
-    res.json({ success: true, data: top });
-  } catch (err) {
-    console.error("getTopGivers error:", err);
-    res.status(500).json({ message: "Failed to fetch top givers" });
-  }
-};
-
-/* ============================================================
-   GET /api/partners/by/:type/:value
-   ============================================================ */
-export const getPartnersByChurchOrGroup = async (req, res) => {
-  try {
-    const { type, value } = req.params;
-    if (!type || !value) return res.status(400).json({ message: "Type and value are required" });
-
-    const query = {};
-    if (type === "church") query.church = value;
-    else if (type === "group") query.group = value;
-    else return res.status(400).json({ message: "Type must be 'church' or 'group'" });
-
-    const partners = await Partner.find(query).lean();
-    res.json({ success: true, count: partners.length, data: partners });
-  } catch (err) {
-    console.error("getPartnersByChurchOrGroup error:", err);
-    res.status(500).json({ message: "Failed to fetch partners by type/value" });
   }
 };
