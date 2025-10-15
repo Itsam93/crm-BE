@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import User from "../models/userModel.js"; // if you have a User model
 
 // Protect routes: verify JWT token
 export const protect = async (req, res, next) => {
