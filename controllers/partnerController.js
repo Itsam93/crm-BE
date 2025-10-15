@@ -207,10 +207,29 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "Empty file" });
     }
 
-    // Detect date columns (YYYY-MM-DD)
-    const dateColumns = Object.keys(rawData[0]).filter((key) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(key)
-    );
+    // Log detected headers for debugging
+    console.log("Sheet headers:", Object.keys(rawData[0]));
+
+    // Detect date columns (supports multiple formats)
+    const dateColumns = Object.keys(rawData[0]).filter((key) => {
+      const cleaned = key.toString().trim();
+      return (
+        /^\d{4}-\d{2}-\d{2}$/.test(cleaned) || // 2025-08-01
+        /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(cleaned) || // 01/08/2025 or 8/1/2025
+        /^[A-Za-z]{3,9}\s?\d{1,2},?\s?\d{2,4}$/.test(cleaned) || // Aug 1, 2025 or August 1 2025
+        /^\d{1,2}-[A-Za-z]{3,9}-\d{2,4}$/.test(cleaned) // 1-Aug-25
+      );
+    });
+
+    if (dateColumns.length === 0) {
+      return res.status(400).json({ message: "No date columns detected" });
+    }
+
+    const normalizeDate = (val) => {
+      const d = new Date(val);
+      if (!isNaN(d)) return d.toISOString().split("T")[0];
+      return null;
+    };
 
     const melted = [];
 
@@ -220,19 +239,19 @@ export const bulkUploadPartners = async (req, res) => {
       const group = String(row["Group"] || "").trim();
       const partnershipArm = String(row["Arm"] || "").trim();
 
-      if (!fullName || !church || !partnershipArm) return; // skip invalid
+      if (!fullName || !church || !partnershipArm) return; // skip incomplete rows
 
-      // Expand each date into its own record
       dateColumns.forEach((dateKey) => {
         const amount = Number(row[dateKey] || 0);
-        if (amount > 0) {
+        const normalizedDate = normalizeDate(dateKey);
+        if (amount > 0 && normalizedDate) {
           melted.push({
             fullName,
             church,
             group,
             partnershipArm,
             amount,
-            date: new Date(dateKey),
+            date: normalizedDate,
             status: "confirmed",
             notes: "",
           });
@@ -244,17 +263,19 @@ export const bulkUploadPartners = async (req, res) => {
       return res.status(400).json({ message: "No valid giving data found" });
     }
 
-    // Insert into MongoDB
+    // Save to MongoDB
     await Partner.insertMany(melted);
 
     res.status(201).json({
       message: `Upload successful (${melted.length} records)`,
+      totalRecords: melted.length,
     });
   } catch (err) {
     console.error("Error processing upload:", err);
     res.status(500).json({ message: err.message || "Internal server error" });
   }
 };
+
 
 
 
