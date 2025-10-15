@@ -28,7 +28,7 @@ const allowedOrigins = [
 ];
 
 const corsOptions = {
-  origin: function (origin, callback) {
+  origin: (origin, callback) => {
     // allow requests with no origin (like mobile apps, curl)
     if (!origin) return callback(null, true);
     if (!allowedOrigins.includes(origin)) {
@@ -41,11 +41,8 @@ const corsOptions = {
   credentials: true,
 };
 
-// Enable CORS
+// Enable CORS globally (handles OPTIONS preflight automatically)
 app.use(cors(corsOptions));
-
-// Handle preflight OPTIONS requests for all routes
-app.options("/*", cors(corsOptions));
 
 // -----------------------
 // Security & Logging
