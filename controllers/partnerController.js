@@ -253,70 +253,42 @@ export const bulkUploadPartners = async (req, res) => {
 export const getGivingsByArm = async (req, res) => {
   try {
     let { armName } = req.params;
-    const { page = 1, limit = 30, search = "" } = req.query;
-    const pageNum = Math.max(1, parseInt(page, 10));
-    const pageSize = Math.max(1, Math.min(200, parseInt(limit, 10)));
-    const skip = (pageNum - 1) * pageSize;
-
-    if (!armName?.trim()) return res.status(400).json({ message: "Arm is required" });
-
-    const normalizedArm = normalizeArm(armName);
-
-    const role = req.user?.role;
-    if ((role === "HealingHOD" && !/healing/i.test(normalizedArm)) ||
-        (role === "RhapsodyHOD" && !/rhapsody/i.test(normalizedArm)) ||
-        (role === "MinistryHOD" && !/ministry/i.test(normalizedArm))) {
-      return res.status(403).json({ message: "Access denied" });
+    if (!armName || !armName.trim()) {
+      return res.status(400).json({ message: "Arm name is required" });
     }
 
-    const match = { partnershipArm: { $regex: normalizedArm, $options: "i" } };
-    if (search) match.$or = [
-      { fullName: { $regex: search, $options: "i" } },
-      { church: { $regex: search, $options: "i" } },
-    ];
+    // Normalize arm
+    armName = armName.toLowerCase().trim();
+    const normalizedArm = /healing/.test(armName)
+      ? "Healing"
+      : /rhapsody/.test(armName)
+      ? "Rhapsody"
+      : /ministry/.test(armName)
+      ? "Ministry"
+      : armName;
 
-    const agg = [
-      { $match: match },
-      { $group: {
-          _id: "$fullName",
-          fullName: { $first: "$fullName" },
-          church: { $first: "$church" },
-          group: { $first: "$group" },
-          zone: { $first: "$zone" },
-          arm: { $first: "$partnershipArm" },
-          amount: { $sum: "$amount" },
-          lastDate: { $max: "$date" },
-        }
-      },
-      { $sort: { amount: -1 } },
-      { $skip: skip },
-      { $limit: pageSize },
-    ];
+    // Fetch recent 50 entries for this arm
+    const partners = await Partner.find({ partnershipArm: new RegExp(normalizedArm, "i") })
+      .sort({ date: -1 })
+      .limit(50)
+      .lean();
 
-    const [data, totalCountArr] = await Promise.all([
-      Partner.aggregate(agg),
-      Partner.aggregate([{ $match: match }, { $group: { _id: "$fullName" } }, { $count: "count" }])
-    ]);
+    const data = partners.map(p => ({
+      name: p.fullName,
+      church: p.church || "Unassigned Church",
+      arm: p.partnershipArm,
+      amount: p.amount,
+      date: p.date,
+    }));
 
-    const totalItems = totalCountArr[0]?.count || 0;
-
-    res.json({
-      data: data.map(d => ({
-        name: d.fullName,
-        church: d.church,
-        arm: d.arm,
-        amount: d.amount,
-        date: d.lastDate,
-        group: d.group,
-        zone: d.zone,
-      })),
-      meta: { page: pageNum, limit: pageSize, totalPages: Math.ceil(totalItems / pageSize), totalItems }
-    });
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.json({ success: true, data });
   } catch (err) {
     console.error("getGivingsByArm error:", err);
-    res.status(500).json({ message: "Server error fetching givings by arm" });
+    res.status(500).json({ message: "Failed to fetch partners by arm" });
   }
 };
+
 
 /* ============================================================
    GET /api/partners/group-summary
@@ -443,39 +415,35 @@ export const getPartnersByChurchOrGroup = async (req, res) => {
    ============================================================ */
 export const getAdminSummary = async (req, res) => {
   try {
-    // Aggregate totals per arm
-    const totals = await Partner.aggregate([
-      {
-        $group: {
-          _id: "$partnershipArm",
-          totalAmount: { $sum: "$amount" },
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+    // Count total partners
+    const totalPartners = await Partner.countDocuments();
 
-    // Convert to object with default 0
-    const summary = {
-      totalPartners: 0,
-      healing: 0,
-      rhapsody: 0,
-      ministry: 0
-    };
+    // Count by arm
+    const healing = await Partner.countDocuments({ partnershipArm: /healing/i });
+    const rhapsody = await Partner.countDocuments({ partnershipArm: /rhapsody/i });
+    const ministry = await Partner.countDocuments({ partnershipArm: /ministry/i });
 
-    totals.forEach(t => {
-      summary.totalPartners += t.count;
-      if (/healing/i.test(t._id)) summary.healing = t.count;
-      else if (/rhapsody/i.test(t._id)) summary.rhapsody = t.count;
-      else if (/ministry/i.test(t._id)) summary.ministry = t.count;
-    });
-
-    // Get recent entries (last 10)
+    // Get recent 10 entries
     const recent = await Partner.find({})
       .sort({ date: -1 })
       .limit(10)
       .lean();
 
-    res.json({ success: true, summary, recent });
+    // Map fields to frontend-friendly keys
+    const recentMapped = recent.map(r => ({
+      name: r.fullName,
+      church: r.church || "Unassigned Church",
+      arm: r.partnershipArm,
+      amount: r.amount,
+      date: r.date,
+    }));
+
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    res.json({
+      success: true,
+      summary: { totalPartners, healing, rhapsody, ministry },
+      recent: recentMapped,
+    });
   } catch (err) {
     console.error("getAdminSummary error:", err);
     res.status(500).json({ message: "Failed to fetch admin summary" });
