@@ -437,18 +437,45 @@ export const getPartnersByChurchOrGroup = async (req, res) => {
 };
 
 
+/* ============================================================
+   GET /api/admin/summary
+   Returns dashboard summary for Admin
+   ============================================================ */
 export const getAdminSummary = async (req, res) => {
   try {
-    const totalPartners = await Partner.countDocuments();
-    const healing = await Partner.countDocuments({ partnershipArm: /healing/i });
-    const rhapsody = await Partner.countDocuments({ partnershipArm: /rhapsody/i });
-    const ministry = await Partner.countDocuments({ partnershipArm: /ministry/i });
-    const recent = await Partner.find().sort({ date: -1 }).limit(10).lean();
+    // Aggregate totals per arm
+    const totals = await Partner.aggregate([
+      {
+        $group: {
+          _id: "$partnershipArm",
+          totalAmount: { $sum: "$amount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
-    res.json({
-      summary: { totalPartners, healing, rhapsody, ministry },
-      recent
+    // Convert to object with default 0
+    const summary = {
+      totalPartners: 0,
+      healing: 0,
+      rhapsody: 0,
+      ministry: 0
+    };
+
+    totals.forEach(t => {
+      summary.totalPartners += t.count;
+      if (/healing/i.test(t._id)) summary.healing = t.count;
+      else if (/rhapsody/i.test(t._id)) summary.rhapsody = t.count;
+      else if (/ministry/i.test(t._id)) summary.ministry = t.count;
     });
+
+    // Get recent entries (last 10)
+    const recent = await Partner.find({})
+      .sort({ date: -1 })
+      .limit(10)
+      .lean();
+
+    res.json({ success: true, summary, recent });
   } catch (err) {
     console.error("getAdminSummary error:", err);
     res.status(500).json({ message: "Failed to fetch admin summary" });
