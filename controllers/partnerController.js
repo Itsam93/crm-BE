@@ -231,3 +231,21 @@ export const bulkUploadPartners = async (req, res) => {
     res.status(500).json({ message: "Failed processing upload", error: err.message });
   }
 };
+
+/* ============================================================
+   GET /api/partners/arm/:arm
+   ============================================================ */
+export const getGivingsByArm = async (req, res) => {
+  try {
+    const { arm } = req.params;
+    if (!arm) return res.status(400).json({ message: "Arm is required" });
+
+    const normalizedArm = arm.trim();
+    const partners = await Partner.find({ partnershipArm: { $regex: normalizedArm, $options: "i" } }).lean();
+
+    res.json({ success: true, count: partners.length, data: partners });
+  } catch (err) {
+    console.error("getGivingsByArm error:", err);
+    res.status(500).json({ message: "Failed to fetch partners by arm" });
+  }
+};
