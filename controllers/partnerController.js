@@ -193,101 +193,60 @@ export const deletePartner = async (req, res) => {
    ============================================================ */
 export const bulkUploadPartners = async (req, res) => {
   try {
-    if (!req.file || !req.file.buffer)
+    if (!req.file || !req.file.buffer) {
       return res.status(400).json({ message: "No file uploaded" });
-
-    const filename = req.file.originalname.toLowerCase();
-    const ext = filename.split(".").pop();
-    let rows = [];
-
-    // -------------------------------
-    // Read uploaded file (CSV / Excel)
-    // -------------------------------
-    if (ext === "csv") {
-      const bufferStream = new stream.PassThrough();
-      bufferStream.end(req.file.buffer);
-      await new Promise((resolve, reject) => {
-        bufferStream
-          .pipe(csvParser({ mapHeaders: ({ header }) => header.trim() }))
-          .on("data", (data) => rows.push(data))
-          .on("end", resolve)
-          .on("error", reject);
-      });
-    } else if (ext === "xls" || ext === "xlsx") {
-      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-    } else {
-      return res.status(400).json({ message: "Unsupported file type" });
     }
 
-    if (!rows.length)
-      return res.status(400).json({ message: "File contains no rows" });
+    // Read workbook from buffer
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const rawData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-    // -------------------------------
-    // Detect static & date columns
-    // -------------------------------
-    const sample = rows[0];
-    const headers = Object.keys(sample).map((h) => h.trim());
+    if (rawData.length === 0) {
+      return res.status(400).json({ message: "Empty file" });
+    }
 
-    // Core columns you have: Name, Church, Group, Arm
-    const staticCols = ["name", "full name", "fullname", "church", "group", "arm"];
-    const dateCols = headers.filter((h) =>
-      /^\d{4}-\d{2}-\d{2}$/.test(h.trim())
-    );
+    // Identify date columns automatically
+    const dateColumns = Object.keys(rawData[0]).filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key));
 
-    if (!dateCols.length)
-      return res
-        .status(400)
-        .json({ message: "No date columns found. Ensure headers are in YYYY-MM-DD format." });
-
-    // -------------------------------
-    // Transform (melt) wide → long
-    // -------------------------------
     const melted = [];
 
-    for (const row of rows) {
-      const fullName =
-        row.name || row["Full Name"] || row.fullName || row["fullname"];
-      const church = row.church || row["Church"] || "";
-      const group = row.group || row["Group"] || "";
-      const arm = row.arm || row["Arm"] || "";
+    rawData.forEach((row) => {
+      const base = {
+        name: String(row["Name"] || "").trim(),
+        church: String(row["Church"] || "").trim(),
+        group: String(row["Group"] || "").trim(),
+        arm: String(row["Arm"] || "").trim(),
+      };
 
-      if (!fullName || !arm) continue;
+      // Expand each date column as a separate record
+      dateColumns.forEach((dateKey) => {
+        const amount = Number(row[dateKey] || 0);
+        if (amount > 0) {
+          melted.push({
+            ...base,
+            date: dateKey,
+            amount,
+          });
+        }
+      });
+    });
 
-      for (const dateCol of dateCols) {
-        const amount = Number(row[dateCol]);
-        if (!amount || isNaN(amount)) continue;
-
-        melted.push({
-          fullName: String(fullName).trim(),
-          church: String(church).trim(),
-          group: String(group).trim(),
-          partnershipArm: normalizeArm(arm),
-          amount,
-          date: new Date(dateCol),
-          status: "confirmed",
-        });
-      }
+    if (melted.length === 0) {
+      return res.status(400).json({ message: "No valid giving data found" });
     }
 
-    if (!melted.length)
-      return res
-        .status(400)
-        .json({ message: "No valid giving data found in the file" });
+    // Optionally save to MongoDB
+    await Partner.insertMany(melted);
 
-    // -------------------------------
-    // Save to database
-    // -------------------------------
-    const created = await Partner.insertMany(melted);
-
-    res.status(201).json({
-      message: `${created.length} giving records uploaded successfully`,
-      data: created.map(formatPartner),
+    res.status(200).json({
+      message: "Upload successful",
+      totalRecords: melted.length,
     });
   } catch (err) {
-    console.error("bulkUploadPartners error:", err);
-    res.status(500).json({ message: "Failed to upload givings" });
+    console.error("Error processing upload:", err);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
