@@ -18,13 +18,13 @@ export const loginUser = async (req, res) => {
       return res.status(400).json({ message: "Password is required" });
     }
 
-    // Map passwords to roles (all lowercase for consistency)
+    // Map passwords to roles using PascalCase to match frontend armMap
     const roleMap = {
-      [ADMIN_PASSWORD]: "admin",
-      [VIEWER_PASSWORD]: "viewer",
-      [HEALING_HOD_PASSWORD]: "healinghod",
-      [RHAPSODY_HOD_PASSWORD]: "rhapsodyhod",
-      [MINISTRY_HOD_PASSWORD]: "ministryhod",
+      [ADMIN_PASSWORD]: "Admin",
+      [VIEWER_PASSWORD]: "Viewer",
+      [HEALING_HOD_PASSWORD]: "HealingHOD",
+      [RHAPSODY_HOD_PASSWORD]: "RhapsodyHOD",
+      [MINISTRY_HOD_PASSWORD]: "MinistryHOD",
     };
 
     const role = roleMap[password];
