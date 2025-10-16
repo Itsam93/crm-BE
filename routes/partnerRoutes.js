@@ -1,106 +1,59 @@
 import express from "express";
-import multer from "multer";
-import path from "path";
 import {
   getAllPartners,
   getPartnerById,
-  addGiving, 
-  createPartners,
+  createPartner,
+  addGiving,
   updatePartner,
   deletePartner,
   bulkUploadPartners,
   getGivingsByArm,
-  getTotalGivingsPerMember,
   getGroupSummary,
+  getTotalGivingsPerMember,
   getTopGivers,
   getPartnersByChurchOrGroup,
+  getAdminSummary,
 } from "../controllers/partnerController.js";
-
-import { protect, restrictTo } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ---------------------- MULTER CONFIG ----------------------
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, 
-  fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if ([".csv", ".xls", ".xlsx"].includes(ext)) cb(null, true);
-    else cb(new Error("Only CSV, XLS, XLSX files are allowed"));
-  },
-});
+// Create a new partner (with optional initial giving)
+router.post("/", createPartner);
 
-// ---------------------- PROTECT ALL ROUTES ----------------------
-router.use(protect);
+// Add giving to an existing partner
+router.post("/add-giving", addGiving);
 
-/* ---------------------- READ ROUTES ---------------------- */
+// Get all partners
+router.get("/", getAllPartners);
 
-// Total givings per member (across all arms)
-router.get(
-  "/totals",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getTotalGivingsPerMember
-);
+// Get partner by ID
+router.get("/:id", getPartnerById);
 
-// Top givers overall
-router.get(
-  "/top/givers",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getTopGivers
-);
+// Update partner
+router.put("/:id", updatePartner);
 
-// Group summary (by group name)
-router.get(
-  "/summary/group/:groupName",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getGroupSummary
-);
+// Delete partner
+router.delete("/:id", deletePartner);
 
-// Partners by church or group (for filtering)
-router.get(
-  "/by/:type/:value",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getPartnersByChurchOrGroup
-);
+// Bulk upload partners via CSV/XLSX
+router.post("/upload", bulkUploadPartners);
 
-// Get givings by partnership arm
-router.get(
-  "/arm/:armName",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getGivingsByArm
-);
+// Get givings by arm
+router.get("/arm/:armName", getGivingsByArm);
 
-// List all records (with pagination/filter/search)
-router.get(
-  "/",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getAllPartners
-);
+// Get group summary
+router.get("/group-summary", getGroupSummary);
 
-// Get single record by ID (keep last)
-router.get(
-  "/:id",
-  restrictTo("admin", "viewer", "healinghod", "rhapsodyhod", "ministryhod"),
-  getPartnerById
-);
+// Get totals per member
+router.get("/totals", getTotalGivingsPerMember);
 
-/* ---------------------- WRITE ROUTES (ADMIN ONLY) ---------------------- */
+// Get top 100 givers
+router.get("/top/givers", getTopGivers);
 
-// Create new partner (optional first giving)
-router.post("/", protect, restrictTo("Super Admin", "HOD"), createPartner);
+// Get partners by church or group
+router.get("/by/:type/:value", getPartnersByChurchOrGroup);
 
-// Add giving to existing partner
-router.post("/giving", protect, restrictTo("Super Admin", "HOD"), addGiving);
-
-// Bulk upload
-router.post("/upload", upload.single("file"), restrictTo("admin"), bulkUploadPartners);
-
-// Update giving/partner
-router.put("/:id", restrictTo("admin"), updatePartner);
-
-// Delete giving/partner
-router.delete("/:id", restrictTo("admin"), deletePartner);
+// Admin dashboard summary
+router.get("/admin/summary", getAdminSummary);
 
 export default router;
