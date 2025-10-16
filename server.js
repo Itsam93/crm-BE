@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import dotenv from "dotenv";
 import helmet from "helmet";
@@ -5,6 +6,7 @@ import morgan from "morgan";
 import cors from "cors";
 import multer from "multer";
 import XLSX from "xlsx";
+import mongoose from "mongoose";
 
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -29,26 +31,42 @@ const allowedOrigins = [
   "https://crm-app-atjd.vercel.app"
 ];
 
-const corsOptions = {
+app.use(cors({
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, true); 
     if (!allowedOrigins.includes(origin)) {
-      return callback(new Error(`CORS policy: The origin ${origin} is not allowed.`), false);
+      console.warn(`Blocked CORS request from origin: ${origin}`);
+      return callback(new Error("Not allowed by CORS"), false);
     }
     return callback(null, true);
   },
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-};
+}));
 
-app.use(cors(corsOptions));
+// Handle OPTIONS preflight
+app.options("*", cors());
 
 // -----------------------
 // Security & Logging
 // -----------------------
 app.use(helmet());
 app.use(morgan("tiny"));
+
+// -----------------------
+// MongoDB Schemas
+// -----------------------
+const contributionSchema = new mongoose.Schema({
+  fullName: { type: String, required: true },
+  church: { type: String, required: true },
+  partnershipArm: { type: String, required: true },
+  amount: { type: Number, required: true },
+  date: { type: Date, required: true },
+}, { timestamps: true });
+
+contributionSchema.index({ fullName: 1, partnershipArm: 1, date: 1 }, { unique: true }); // prevent duplicates
+
+const Contribution = mongoose.model("Contribution", contributionSchema);
 
 // -----------------------
 // Routes
@@ -62,21 +80,8 @@ app.use("/api/partners", partnerRoutes);
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// MongoDB Partner Contribution Model (adjust if you have a separate file)
-import mongoose from "mongoose";
-
-const contributionSchema = new mongoose.Schema({
-  fullName: String,
-  church: String,
-  partnershipArm: String,
-  amount: Number,
-  date: Date,
-});
-
-const Contribution = mongoose.model("Contribution", contributionSchema);
-
 // Upload endpoint
-app.post("/api/upload", upload.single("file"), async (req, res) => {
+app.post("/api/partners/upload", upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
@@ -107,7 +112,16 @@ app.post("/api/upload", upload.single("file"), async (req, res) => {
       });
     });
 
-    await Contribution.insertMany(transformedData);
+    // Insert while ignoring duplicates
+    const insertPromises = transformedData.map(item => 
+      Contribution.updateOne(
+        { fullName: item.fullName, partnershipArm: item.partnershipArm, date: item.date },
+        { $set: item },
+        { upsert: true }
+      )
+    );
+
+    await Promise.all(insertPromises);
 
     res.json({ message: "File uploaded and data saved successfully", count: transformedData.length });
   } catch (err) {

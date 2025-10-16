@@ -167,7 +167,62 @@ export const addGiving = async (req, res) => {
   }
 };
 
+/* =========================
+   Create Partner (with optional initial giving)
+   ========================= */
+export const createPartner = async (req, res) => {
+  try {
+    const { fullName, church, arm, zone, amount, dateOfGiving } = req.body;
 
+    if (!fullName || !church) {
+      return res.status(400).json({ message: "Full name and church are required" });
+    }
+
+    // Check if partner already exists
+    let partner = await Partner.findOne({ fullName: fullName.trim(), church: church.trim() });
+
+    if (!partner) {
+      // Normalize fields
+      const normalizedArm = arm?.trim() || "Unknown Arm";
+      const normalizedZone = zone?.trim() || "Unknown Zone";
+
+      partner = await Partner.create({
+        fullName: fullName.trim(),
+        church: church.trim(),
+        arm: normalizedArm,
+        zone: normalizedZone,
+        givings: [] // start empty
+      });
+    }
+
+    // If amount is provided, add as first giving
+    if (amount && !isNaN(amount)) {
+      partner.givings.push({
+        amount: Number(amount),
+        date: dateOfGiving ? new Date(dateOfGiving) : new Date()
+      });
+      await partner.save();
+    }
+
+    // Compute totalAmount
+    const totalAmount = partner.givings.reduce((sum, g) => sum + g.amount, 0);
+
+    res.status(201).json({
+      partner: {
+        id: partner._id,
+        fullName: partner.fullName,
+        church: partner.church,
+        arm: partner.arm,
+        zone: partner.zone,
+        givings: partner.givings,
+        totalAmount
+      }
+    });
+  } catch (error) {
+    console.error("Error creating partner:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
 /* ============================================================
    PUT /api/partners/:id

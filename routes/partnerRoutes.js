@@ -5,6 +5,7 @@ import {
   getAllPartners,
   getPartnerById,
   addGiving, 
+  createPartners,
   updatePartner,
   deletePartner,
   bulkUploadPartners,
@@ -87,8 +88,11 @@ router.get(
 
 /* ---------------------- WRITE ROUTES (ADMIN ONLY) ---------------------- */
 
-// ✅ Add new giving (formerly createPartner)
-router.post("/", restrictTo("admin"), addGiving);
+// Create new partner (optional first giving)
+router.post("/", protect, restrictTo("Super Admin", "HOD"), createPartner);
+
+// Add giving to existing partner
+router.post("/giving", protect, restrictTo("Super Admin", "HOD"), addGiving);
 
 // Bulk upload
 router.post("/upload", upload.single("file"), restrictTo("admin"), bulkUploadPartners);
