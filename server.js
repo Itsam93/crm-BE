@@ -1,4 +1,6 @@
-// 1. Imports & setup
+// ============================================================
+// 📦 Imports & Setup
+// ============================================================
 import express from "express";
 import dotenv from "dotenv";
 import helmet from "helmet";
@@ -12,6 +14,9 @@ import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import partnerRoutes from "./routes/partnerRoutes.js";
 
+// ============================================================
+// 🌍 Environment & Database
+// ============================================================
 dotenv.config();
 connectDB();
 
@@ -19,43 +24,67 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS
+// ============================================================
+// 🔐 CORS Configuration
+// ============================================================
+// ✅ Allow both localhost (dev) and Vercel frontend (prod)
 const allowedOrigins = [
+  "http://localhost:5173",
   "http://localhost:5174",
-  "https://crm-app-atjd.vercel.app"
+  "https://crm-app-atjd.vercel.app", // your deployed frontend
 ];
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (!allowedOrigins.includes(origin)) return callback(new Error("Not allowed by CORS"), false);
-    return callback(null, true);
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
 
-// Security & Logging
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.warn("🚫 Blocked by CORS:", origin);
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
+
+// ============================================================
+// 🛡 Security & Logging
+// ============================================================
 app.use(helmet());
-app.use(morgan("tiny"));
+app.use(morgan("dev"));
 
-// MongoDB Schema
-const contributionSchema = new mongoose.Schema({
-  fullName: { type: String, required: true },
-  church: { type: String, required: true },
-  partnershipArm: { type: String, required: true },
-  amount: { type: Number, required: true },
-  date: { type: Date, required: true },
-}, { timestamps: true });
+// ============================================================
+// 🧩 Mongoose Schema (for Excel Uploads)
+// ============================================================
+const contributionSchema = new mongoose.Schema(
+  {
+    fullName: { type: String, required: true },
+    church: { type: String, required: true },
+    partnershipArm: { type: String, required: true },
+    amount: { type: Number, required: true },
+    date: { type: Date, required: true },
+  },
+  { timestamps: true }
+);
 
+// Prevent duplicates: same name + arm + date
 contributionSchema.index({ fullName: 1, partnershipArm: 1, date: 1 }, { unique: true });
 
 const Contribution = mongoose.model("Contribution", contributionSchema);
 
-// Routes
+// ============================================================
+// 🧭 Routes
+// ============================================================
 app.use("/api/auth", authRoutes);
 app.use("/api/partners", partnerRoutes);
 
-// File Upload
+// ============================================================
+// 📤 Excel File Upload Route
+// ============================================================
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
@@ -67,7 +96,7 @@ app.post("/api/partners/upload", upload.single("file"), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
 
-    const dateCols = Object.keys(rows[0] || {}).filter(col => /\d{4}-\d{2}-\d{2}/.test(col));
+    const dateCols = Object.keys(rows[0] || {}).filter((col) => /\d{4}-\d{2}-\d{2}/.test(col));
     const data = [];
 
     for (const row of rows) {
@@ -79,44 +108,50 @@ app.post("/api/partners/upload", upload.single("file"), async (req, res) => {
             church: row.church,
             partnershipArm: row.partnershipArm,
             amount,
-            date: new Date(date)
+            date: new Date(date),
           });
         }
       }
     }
 
-    // Insert while preventing duplicates
     const promises = data.map(async (item) => {
       const exists = await Contribution.findOne({
         fullName: item.fullName,
-        church: item.church,
         partnershipArm: item.partnershipArm,
-        date: item.date
+        date: item.date,
       });
       if (!exists) return Contribution.create(item);
     });
 
     await Promise.all(promises);
 
-    res.json({ message: "Upload successful", count: data.length });
+    res.json({ message: "Upload successful ✅", count: data.length });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("💥 Upload Error:", err);
+    res.status(500).json({ message: "Server error during upload" });
   }
 });
 
-// Root
-app.get("/", (req, res) => res.json({ message: "CRM Backend API running 🚀" }));
+// ============================================================
+// 🌐 Root Route
+// ============================================================
+app.get("/", (req, res) => res.json({ message: "🚀 CRM Backend API running successfully!" }));
 
-// 404
+// ============================================================
+// 🚫 404 Handler
+// ============================================================
 app.use((req, res, next) => res.status(404).json({ message: "Route not found" }));
 
-// Global Error
+// ============================================================
+// 💥 Global Error Handler
+// ============================================================
 app.use((err, req, res, next) => {
-  console.error(err);
+  console.error("💥 Global Error:", err.message);
   res.status(500).json({ message: err.message || "Internal Server Error" });
 });
 
-// Start
+// ============================================================
+// 🚀 Start Server
+// ============================================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
