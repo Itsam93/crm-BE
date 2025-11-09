@@ -33,18 +33,17 @@ app.use(express.urlencoded({ extended: true }));
 // ============================================================
 // 🔐 CORS Configuration
 // ============================================================
-// ✅ Allow both localhost (dev) and Vercel frontend (prod)
+// ✅ Allow localhost (dev) and Vercel frontend (prod)
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://crm-new-nilr.vercel.app",
+  process.env.VITE_FRONTEND_URL || "https://crm-new-nilr.vercel.app",
 ];
-
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true); // allow tools like Postman
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       } else {
@@ -77,10 +76,7 @@ const contributionSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-// Prevent duplicates: same name + arm + date
 contributionSchema.index({ fullName: 1, partnershipArm: 1, date: 1 }, { unique: true });
-
 const Contribution = mongoose.model("Contribution", contributionSchema);
 
 // ============================================================
@@ -94,7 +90,6 @@ app.use("/api/churches", churchRoutes);
 app.use("/api/members", memberRoutes);
 app.use("/api/givings", givingRoutes);
 app.use("/api/hod", hodRoutes);
-
 
 // ============================================================
 // 📤 Excel File Upload Route
@@ -110,7 +105,9 @@ app.post("/api/partners/upload", upload.single("file"), async (req, res) => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet);
 
-    const dateCols = Object.keys(rows[0] || {}).filter((col) => /\d{4}-\d{2}-\d{2}/.test(col));
+    const dateCols = Object.keys(rows[0] || {}).filter((col) =>
+      /\d{4}-\d{2}-\d{2}/.test(col)
+    );
     const data = [];
 
     for (const row of rows) {

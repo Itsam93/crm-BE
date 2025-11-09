@@ -13,17 +13,11 @@ export const getChurches = async (req, res) => {
 
 export const createChurch = async (req, res) => {
   try {
-    const { name, group_name, pastorName, location } = req.body;
-
+    const { name, group, pastorName, location } = req.body;
     if (!name || !group)
       return res.status(400).json({ message: "Name and Group are required." });
 
     const exists = await Church.findOne({ name, group });
-    if (exists) {
-      return res
-        .status(400)
-        .json({ message: "A church with this name already exists in the group." });
-    }
 
     const church = await Church.create({ name, group, pastorName, location });
     const populated = await church.populate("group", "name group_name");
