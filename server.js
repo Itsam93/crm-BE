@@ -37,8 +37,9 @@ app.use(express.urlencoded({ extended: true }));
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "https://crm-app-atjd.vercel.app", // your deployed frontend
+  "https://crm-new-nilr.vercel.app",
 ];
+
 
 app.use(
   cors({
