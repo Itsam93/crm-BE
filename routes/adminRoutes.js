@@ -1,27 +1,36 @@
+// routes/adminRoutes.js
 import express from "express";
 import {
-  createUser,
-  getUsers,
-  updateUser,
-  deleteUser,
+  getGroups,
+  createGroup,
+  updateGroup,
+  deleteGroup,
+  getAdminSummary,
+  getUpcomingBirthdays,
 } from "../controllers/adminController.js";
 
-import { protect, superAdminOnly } from "../middleware/authMiddleware.js";
+import churchRoutes from "./churchRoutes.js";
+
+import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// All routes are protected: only super_admin can manage users
+// ✅ All admin routes are protected
+router.use(requireAuth, requireAdmin);
 
-// Create a new user
-router.post("/users", protect, superAdminOnly, createUser);
+// ===== Admin Dashboard =====
+router.get("/summary", getAdminSummary);
 
-// Get all users
-router.get("/users", protect, superAdminOnly, getUsers);
+// ✅ Upcoming Birthdays
+router.get("/upcoming-birthdays", getUpcomingBirthdays);
 
-// Update a user by ID
-router.put("/users/:id", protect, superAdminOnly, updateUser);
+// ===== Group Routes =====
+router.get("/groups", getGroups);
+router.post("/groups", createGroup);
+router.put("/groups/:id", updateGroup);
+router.delete("/groups/:id", deleteGroup);
 
-// Delete a user by ID
-router.delete("/users/:id", protect, superAdminOnly, deleteUser);
+// ===== Church Routes =====
+router.use("/churches", churchRoutes);
 
 export default router;

@@ -1,31 +1,19 @@
 import express from "express";
+import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
 import {
+  createMember,
   getMembers,
-  getMemberById,
-  addMember,
   updateMember,
   deleteMember,
-  getGroupsWithChurches,
 } from "../controllers/memberController.js";
-import { protect } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-// ============================
-// Members Routes
-// ============================
-router.route("/")
-  .get(protect, getMembers)
-  .post(protect, addMember);
+router.use(requireAuth, requireAdmin);
 
-router.route("/:id")
-  .get(protect, getMemberById)
-  .put(protect, updateMember)
-  .delete(protect, deleteMember);
-
-// ============================
-// Groups with Churches
-// ============================
-router.get("/groups-with-churches", protect, getGroupsWithChurches);
+router.get("/", getMembers);
+router.post("/", createMember);
+router.put("/:id", updateMember);
+router.delete("/:id", deleteMember);
 
 export default router;

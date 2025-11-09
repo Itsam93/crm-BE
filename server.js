@@ -12,7 +12,13 @@ import mongoose from "mongoose";
 
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
-import partnerRoutes from "./routes/partnerRoutes.js";
+import partnershipRoutes from "./routes/partnershipRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
+import churchRoutes from "./routes/churchRoutes.js";
+import memberRoutes from "./routes/memberRoutes.js";
+import givingRoutes from "./routes/givingRoutes.js";
+import hodRoutes from "./routes/hodRoutes.js";
 
 // ============================================================
 // 🌍 Environment & Database
@@ -80,7 +86,14 @@ const Contribution = mongoose.model("Contribution", contributionSchema);
 // 🧭 Routes
 // ============================================================
 app.use("/api/auth", authRoutes);
-app.use("/api/partners", partnerRoutes);
+app.use("/api/partners", partnershipRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/churches", churchRoutes);
+app.use("/api/members", memberRoutes);
+app.use("/api/givings", givingRoutes);
+app.use("/api/hod", hodRoutes);
+
 
 // ============================================================
 // 📤 Excel File Upload Route

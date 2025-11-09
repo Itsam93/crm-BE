@@ -1,11 +1,12 @@
 {
   "name": "crm-be",
   "version": "1.0.0",
-  "description": "",
+  "description": "CRM Backend API (Development Mode)",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node -r dotenv/config server.js"
+    "start": "node -r dotenv/config server.js",
+    "dev": "nodemon -r dotenv/config server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -35,6 +36,10 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "socket.io": "^4.8.1",
+    "uuid": "^13.0.0",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
   }
 }
