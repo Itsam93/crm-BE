@@ -126,7 +126,6 @@ export const getGivings = async (req, res) => {
   }
 };
 
-
 // ✅ Edit giving
 export const updateGiving = async (req, res) => {
   try {
