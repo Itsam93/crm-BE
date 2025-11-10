@@ -29,7 +29,6 @@ export const createMember = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 // ✅ Get all members (exclude deleted)
 export const getMembers = async (req, res) => {
   try {

@@ -62,3 +62,21 @@ export const deleteChurch = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+
+// Get churches for a specific group
+export const getChurchesByGroup = async (req, res) => {
+  try {
+    const { groupId } = req.params;
+
+    const churches = await Church.find({ group: groupId }).populate(
+      "group",
+      "group_name"
+    );
+
+    res.status(200).json(churches);
+  } catch (err) {
+    console.error("Error fetching churches for group:", err);
+    res.status(500).json({ message: err.message });
+  }
+};

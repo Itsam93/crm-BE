@@ -1,10 +1,10 @@
-// routes/churchRoutes.js
 import express from "express";
 import {
   getChurches,
   createChurch,
   updateChurch,
   deleteChurch,
+  getChurchesByGroup, 
 } from "../controllers/churchController.js";
 import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
 
@@ -14,9 +14,10 @@ const router = express.Router();
 router.use(requireAuth, requireAdmin);
 
 // ===== Church Routes =====
-router.get("/", getChurches);            // GET /api/churches
-router.post("/", createChurch);          // POST /api/churches
-router.put("/:id", updateChurch);        // PUT /api/churches/:id
-router.delete("/:id", deleteChurch);     // DELETE /api/churches/:id
+router.get("/", getChurches);                   
+router.get("/group/:groupId", getChurchesByGroup); 
+router.post("/", createChurch);                 
+router.put("/:id", updateChurch);              
+router.delete("/:id", deleteChurch);           
 
 export default router;

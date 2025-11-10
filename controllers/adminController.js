@@ -40,19 +40,19 @@ export const getAdminSummary = async (req, res) => {
 };
 
 // ===== Group Management =====
-// ✅ Create a new group
-const escapeRegex = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// 🟢 Create a new group
 export const createGroup = async (req, res) => {
   try {
-    let { group_name } = req.body;
+    let { group_name, pastor } = req.body;
 
-    // Validate input
     if (!group_name || !group_name.trim()) {
       return res.status(400).json({ message: "Group name is required" });
     }
 
     group_name = group_name.trim();
+    if (pastor) pastor = pastor.trim();
 
     // Case-insensitive duplicate check
     const existing = await Group.findOne({
@@ -68,6 +68,7 @@ export const createGroup = async (req, res) => {
     // Create new group
     const newGroup = new Group({
       group_name,
+      pastor: pastor || "Not assigned",
       isActive: true,
     });
 
@@ -82,10 +83,10 @@ export const createGroup = async (req, res) => {
   }
 };
 
-// Update a group
+// 🟡 Update a group
 export const updateGroup = async (req, res) => {
   try {
-    const { group_name } = req.body;
+    const { group_name, pastor } = req.body;
     const { id } = req.params;
 
     if (!group_name || !group_name.trim()) {
@@ -93,9 +94,10 @@ export const updateGroup = async (req, res) => {
     }
 
     const trimmedName = group_name.trim();
+    const trimmedPastor = pastor?.trim() || "Not assigned";
 
     const existing = await Group.findOne({
-      _id: { $ne: id }, // exclude current group
+      _id: { $ne: id },
       group_name: { $regex: `^${escapeRegex(trimmedName)}$`, $options: "i" },
     });
 
@@ -107,7 +109,7 @@ export const updateGroup = async (req, res) => {
 
     const updatedGroup = await Group.findByIdAndUpdate(
       id,
-      { group_name: trimmedName },
+      { group_name: trimmedName, pastor: trimmedPastor },
       { new: true }
     );
 
@@ -122,7 +124,7 @@ export const updateGroup = async (req, res) => {
   }
 };
 
-// Get all groups
+// 🟣 Get all groups
 export const getGroups = async (req, res) => {
   try {
     const groups = await Group.find().sort({ group_name: 1 });
@@ -133,7 +135,7 @@ export const getGroups = async (req, res) => {
   }
 };
 
-// Delete a group
+// 🔴 Delete a group
 export const deleteGroup = async (req, res) => {
   try {
     const { id } = req.params;
@@ -149,6 +151,7 @@ export const deleteGroup = async (req, res) => {
     res.status(500).json({ message: "Server error while deleting group" });
   }
 };
+
 
 export const getUpcomingBirthdays = async (req, res) => {
   try {
