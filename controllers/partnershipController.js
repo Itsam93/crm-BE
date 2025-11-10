@@ -129,38 +129,66 @@ export const deleteGiving = async (req, res) => {
 export const getReports = async (req, res) => {
   try {
     const { type } = req.query; // "group", "church", "individual"
+    const allArms = ["Rhapsody", "Healing School", "Ministry Programs"];
 
-    let data = [];
+    // Fetch all givings with populated references
+    const givings = await Giving.find({ isDeleted: false })
+      .populate("member")
+      .populate("group")
+      .populate("church");
 
-    if (type === "group") {
-      data = await Giving.aggregate([
-        { $match: { isDeleted: false } },
-        { $group: { _id: "$group", total: { $sum: "$amount" } } },
-        { $sort: { total: -1 } },
-        { $limit: 10 },
-      ]).lookup({ from: "groups", localField: "_id", foreignField: "_id", as: "group" });
-    }
+    const totals = {};
 
-    if (type === "church") {
-      data = await Giving.aggregate([
-        { $match: { isDeleted: false } },
-        { $group: { _id: "$church", total: { $sum: "$amount" } } },
-        { $sort: { total: -1 } },
-        { $limit: 10 },
-      ]).lookup({ from: "churches", localField: "_id", foreignField: "_id", as: "church" });
-    }
+    givings.forEach((g) => {
+      // Normalize the arm name
+      const rawArm = g.arm || g.partnershipArm || "";
+      const armName = rawArm.toLowerCase().includes("healing")
+        ? "Healing School"
+        : rawArm.toLowerCase().includes("ministry")
+        ? "Ministry Programs"
+        : "Rhapsody";
 
-    if (type === "individual") {
-      data = await Giving.aggregate([
-        { $match: { isDeleted: false } },
-        { $group: { _id: "$member", total: { $sum: "$amount" } } },
-        { $sort: { total: -1 } },
-        { $limit: 100 },
-      ]).lookup({ from: "members", localField: "_id", foreignField: "_id", as: "member" });
-    }
+      let entityName = "N/A";
 
-    res.json({ type, data });
+      if (type === "individual") {
+        // Show all individuals who gave
+        entityName = g.member?.name || g.memberName || "Unknown Member";
+      } 
+      else if (type === "group") {
+        // Show all groups where member or group gave
+        entityName =
+          g.group?.group_name ||
+          g.member?.group?.group_name ||
+          "Unknown Group";
+      } 
+      else if (type === "church") {
+        // Show all churches where member or group belongs
+        entityName =
+          g.church?.name ||
+          g.member?.church?.name ||
+          g.group?.church?.name ||
+          "Unknown Church";
+      }
+
+      // Skip if entityName is still unknown
+      if (!entityName || entityName === "N/A") return;
+
+      // Initialize the entity totals if not already
+      if (!totals[entityName]) {
+        totals[entityName] = {
+          arms: Object.fromEntries(allArms.map((a) => [a, 0])),
+          grandTotal: 0,
+        };
+      }
+
+      // Add the giving amount
+      totals[entityName].arms[armName] += g.amount || 0;
+      totals[entityName].grandTotal += g.amount || 0;
+    });
+
+    res.json({ type, data: totals });
   } catch (error) {
+    console.error("Error in getReports:", error);
     res.status(500).json({ message: error.message });
   }
 };

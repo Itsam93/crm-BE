@@ -13,7 +13,7 @@ export const getAdminSummary = async (req, res) => {
       Member.countDocuments(),
     ]);
 
-    const givingAgg = await Giving.aggregate([
+    const givingsAgg = await Giving.aggregate([
       {
         $group: {
           _id: null,
@@ -23,19 +23,19 @@ export const getAdminSummary = async (req, res) => {
       },
     ]);
 
-    const totalGivingsAmount = givingAgg[0]?.totalAmount || 0;
-    const totalGivingsCount = givingAgg[0]?.count || 0;
+    const totalGivingsAmount = givingsAgg[0]?.totalAmount || 0;
+    const totalGivingsCount = givingsAgg[0]?.count || 0;
 
-    res.json({
+    res.status(200).json({
       totalGroups,
       totalChurches,
       totalMembers,
-      totalGivingsCount,
       totalGivingsAmount,
+      totalGivingsCount,
     });
   } catch (err) {
     console.error("Error in getAdminSummary:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error fetching summary" });
   }
 };
 

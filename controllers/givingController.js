@@ -128,7 +128,6 @@ export const getGivings = async (req, res) => {
 
 
 // ✅ Edit giving
-// ✅ Edit giving
 export const updateGiving = async (req, res) => {
   try {
     const { id } = req.params;
@@ -168,12 +167,33 @@ export const updateGiving = async (req, res) => {
 export const deleteGiving = async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await Giving.findByIdAndUpdate(id, { deleted: true }, { new: true });
-    if (!deleted) return res.status(404).json({ message: "Giving entry not found" });
-    res.status(200).json({ message: "Giving entry soft-deleted successfully" });
+
+    const deletedGiving = await Giving.findByIdAndDelete(id);
+    if (!deletedGiving) {
+      return res.status(404).json({ message: "Giving not found" });
+    }
+
+    // 🔁 Recalculate summary totals
+    const givingsAgg = await Giving.aggregate([
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const totalGivingsAmount = givingsAgg[0]?.totalAmount || 0;
+    const totalGivingsCount = givingsAgg[0]?.count || 0;
+
+    res.status(200).json({
+      message: "Giving deleted successfully",
+      summary: { totalGivingsAmount, totalGivingsCount },
+    });
   } catch (error) {
     console.error("Error deleting giving:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error while deleting giving" });
   }
 };
 
