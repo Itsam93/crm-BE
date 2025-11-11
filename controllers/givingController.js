@@ -309,33 +309,65 @@ export const bulkUploadGivings = async (req, res) => {
 
 
 // ✅ Reporting: top givers (members, groups, churches)
-// ✅ Reporting: top givers
 export const getReports = async (req, res) => {
   try {
-    const { type } = req.query; // "member", "church", or "group"
-    let { hodId } = req.query;
+    let { type, hodId, partnershipArm } = req.query;
+    console.log("🔹 Incoming query params:", { type, hodId, partnershipArm });
 
-    // If HOD, restrict to their ID automatically
-    if (req.user && req.user.role && req.user.role.includes("_hod")) {
+    // Map frontend type to backend type
+    const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
+    type = typeMap[type?.toLowerCase()];
+    if (!type) return res.status(400).json({ message: "Invalid report type" });
+    console.log("ℹ️ Mapped report type:", type);
+
+    // Auto-restrict HODs
+    if (req.user && req.user.role?.includes("_hod")) {
       hodId = req.user.id;
+      console.log("ℹ️ Auto-restrict HOD detected. hodId set to:", hodId);
+
+      if (!partnershipArm) {
+        partnershipArm = req.user.role.split("_")[0]; // e.g., rhapsody_hod -> rhapsody
+        console.log("ℹ️ Partnership arm inferred from role:", partnershipArm);
+      }
     }
 
-    // Base match for non-deleted givings
+    // Base match: non-deleted givings
     const match = { deleted: false };
-
-    const pipeline = [
-      { $match: match },
-      // Join with members
-      { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
-      { $unwind: "$member" }
-    ];
-
-    // If HOD filter
-    if (hodId) {
-      pipeline.push({ $match: { "member.hod": new Types.ObjectId(hodId) } });
+    if (partnershipArm) {
+      match.arm = { $regex: `^${partnershipArm}$`, $options: "i" };
+      console.log("ℹ️ Filtering by partnership arm (case-insensitive):", partnershipArm);
     }
 
-    // Join with churches and groups
+    const pipeline = [{ $match: match }];
+
+    // Lookup members
+    pipeline.push(
+      {
+        $lookup: {
+          from: "members",
+          localField: "member",
+          foreignField: "_id",
+          as: "member",
+        },
+      },
+      { $unwind: "$member" }
+    );
+
+    // Filter by HOD (handle both ObjectId and string)
+    if (hodId) {
+      const isValidObjectId = Types.ObjectId.isValid(hodId);
+      pipeline.push({
+        $match: {
+          $or: [
+            { "member.hod": isValidObjectId ? new Types.ObjectId(hodId) : hodId },
+            { "member.hod": hodId } // fallback for string type
+          ],
+        },
+      });
+      console.log("ℹ️ Filtering by HOD ID in aggregation pipeline:", hodId);
+    }
+
+    // Lookup churches and groups
     pipeline.push(
       { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
       { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
@@ -343,44 +375,46 @@ export const getReports = async (req, res) => {
       { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
     );
 
-    // Group based on type
+    // Group stage
+    let groupStage = {};
     if (type === "member") {
-      pipeline.push({
-        $group: {
-          _id: "$member._id",
-          name: { $first: "$member.name" },
-          totalAmount: { $sum: "$amount" },
-          arms: { 
-            $push: { arm: "$arm", amount: "$amount" } 
-          }
-        }
-      });
+      groupStage = {
+        _id: "$member._id",
+        name: { $first: "$member.name" },
+        totalAmount: { $sum: "$amount" },
+        arms: { $push: { arm: "$arm", amount: "$amount" } },
+        church: { $first: "$member.church" },
+        group: { $first: "$member.group" },
+      };
     } else if (type === "church") {
-      pipeline.push({
-        $group: {
-          _id: "$member.church._id",
-          name: { $first: "$member.church.name" },
-          totalAmount: { $sum: "$amount" }
-        }
-      });
+      groupStage = {
+        _id: "$member.church._id",
+        name: { $first: "$member.church.name" },
+        totalAmount: { $sum: "$amount" },
+        arms: { $push: { arm: "$arm", amount: "$amount" } },
+      };
     } else if (type === "group") {
-      pipeline.push({
-        $group: {
-          _id: "$member.group._id",
-          name: { $first: "$member.group.name" },
-          totalAmount: { $sum: "$amount" }
-        }
-      });
+      groupStage = {
+        _id: "$member.group._id",
+        name: { $first: "$member.group.name" },
+        totalAmount: { $sum: "$amount" },
+        arms: { $push: { arm: "$arm", amount: "$amount" } },
+      };
     }
 
-    // Sort descending by totalAmount
+    pipeline.push({ $group: groupStage });
     pipeline.push({ $sort: { totalAmount: -1 } });
+
+    console.log("🔹 Aggregation pipeline:", JSON.stringify(pipeline, null, 2));
 
     const report = await Giving.aggregate(pipeline);
 
+    console.log("✅ Aggregation result count:", report.length);
+    if (!report.length) console.warn("⚠️ No matching givings found. Check 'arm' field and 'member.hod' mapping.");
+
     return res.json(report);
   } catch (err) {
-    console.error("Error generating reports:", err);
+    console.error("❌ Error generating reports:", err);
     return res.status(500).json({ message: err.message || "Server error" });
   }
 };

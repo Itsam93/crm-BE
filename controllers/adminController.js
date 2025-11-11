@@ -155,46 +155,34 @@ export const deleteGroup = async (req, res) => {
 
 export const getUpcomingBirthdays = async (req, res) => {
   try {
-    const today = new Date();
-    const twoWeeksLater = new Date();
-    twoWeeksLater.setDate(today.getDate() + 14);
+    const members = await Member.find({ deleted: false })
+      .populate("group", "group_name")
+      .populate("church", "name");
 
-    // Get members with valid birthdays
-    const members = await Member.find(
-      { birthday: { $exists: true }, deleted: false },
-      "name phone birthday group church"
-    )
-      .populate("group", "name")
-      .populate("church", "name")
-      .lean();
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const today = now.getDate();
 
-    // Filter for birthdays within the next 14 days
-    const upcoming = members.filter((member) => {
-      const bday = new Date(member.birthday);
-      const bMonth = bday.getMonth();
-      const bDay = bday.getDate();
+    // Filter for birthdays in current and next month
+    const upcoming = members
+      .filter((m) => {
+        if (!m.birthday) return false;
+        const bd = new Date(m.birthday);
+        const month = bd.getMonth() + 1;
+        const day = bd.getDate();
 
-      const thisYearBday = new Date(today.getFullYear(), bMonth, bDay);
-      let diffDays = (thisYearBday - today) / (1000 * 60 * 60 * 24);
+        // show this month and early next month birthdays
+        const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+        return (
+          (month === currentMonth && day >= today) ||
+          (month === nextMonth && day <= 10)
+        );
+      })
+      .sort((a, b) => new Date(a.birthday) - new Date(b.birthday));
 
-      if (diffDays < 0) {
-        const nextYearBday = new Date(today.getFullYear() + 1, bMonth, bDay);
-        diffDays = (nextYearBday - today) / (1000 * 60 * 60 * 24);
-      }
-
-      return diffDays >= 0 && diffDays <= 14;
-    });
-
-    // Sort upcoming birthdays by date
-    upcoming.sort((a, b) => {
-      const aDate = new Date(a.birthday);
-      const bDate = new Date(b.birthday);
-      return aDate.getDate() - bDate.getDate();
-    });
-
-    res.status(200).json(upcoming);
-  } catch (error) {
-    console.error("❌ Error fetching upcoming birthdays:", error);
+    res.json(upcoming);
+  } catch (err) {
+    console.error("Error fetching upcoming birthdays:", err);
     res.status(500).json({ message: "Server error fetching birthdays" });
   }
 };

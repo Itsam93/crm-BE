@@ -5,7 +5,6 @@ import {
   addGiving,
   updateGiving,
   deleteGiving,
-  getReports,
 } from "../controllers/partnershipController.js";
 import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
 
@@ -23,8 +22,5 @@ router.put("/:id", requireAuth, requireAdmin, updateGiving);
 
 // Soft delete
 router.delete("/:id", requireAuth, requireAdmin, deleteGiving);
-
-// Reports (top givers, top groups, etc.)
-router.get("/reports", requireAuth, requireAdmin, getReports);
 
 export default router;
