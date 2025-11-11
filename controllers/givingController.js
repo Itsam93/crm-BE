@@ -315,32 +315,47 @@ export const getReports = async (req, res) => {
     console.log("🔹 Incoming query params:", { type, hodId, partnershipArm });
 
     // Map frontend type to backend type
-    const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
+    const typeMap = {
+      individual: "member",
+      member: "member",
+      group: "group",
+      church: "church",
+    };
     type = typeMap[type?.toLowerCase()];
-    if (!type) return res.status(400).json({ message: "Invalid report type" });
     console.log("ℹ️ Mapped report type:", type);
+
+    if (!type) {
+      console.warn("⚠️ Invalid report type");
+      return res.status(400).json({ message: "Invalid report type" });
+    }
 
     // Auto-restrict HODs
     if (req.user && req.user.role?.includes("_hod")) {
       hodId = req.user.id;
       console.log("ℹ️ Auto-restrict HOD detected. hodId set to:", hodId);
 
+      // Automatically get partnership arm from role if not provided
       if (!partnershipArm) {
-        partnershipArm = req.user.role.split("_")[0]; // e.g., rhapsody_hod -> rhapsody
+        partnershipArm = req.user.role.split("_")[0]; // e.g., "rhapsody_hod" => "rhapsody"
         console.log("ℹ️ Partnership arm inferred from role:", partnershipArm);
       }
     }
 
-    // Base match: non-deleted givings
+    // Base match: non-deleted
     const match = { deleted: false };
+
+    // Filter by partnership arm (case-insensitive) if provided
     if (partnershipArm) {
-      match.arm = { $regex: `^${partnershipArm}$`, $options: "i" };
+     match.arm = { $regex: new RegExp(`^${partnershipArm}$`, "i") };
+
       console.log("ℹ️ Filtering by partnership arm (case-insensitive):", partnershipArm);
     }
 
+    console.log("ℹ️ MongoDB match object:", match);
+
     const pipeline = [{ $match: match }];
 
-    // Lookup members
+    // Join members
     pipeline.push(
       {
         $lookup: {
@@ -353,29 +368,37 @@ export const getReports = async (req, res) => {
       { $unwind: "$member" }
     );
 
-    // Filter by HOD (handle both ObjectId and string)
+    // Filter by HOD (convert to ObjectId)
     if (hodId) {
-      const isValidObjectId = Types.ObjectId.isValid(hodId);
       pipeline.push({
-        $match: {
-          $or: [
-            { "member.hod": isValidObjectId ? new Types.ObjectId(hodId) : hodId },
-            { "member.hod": hodId } // fallback for string type
-          ],
-        },
+        $match: { "member.hod": new Types.ObjectId(hodId) },
       });
       console.log("ℹ️ Filtering by HOD ID in aggregation pipeline:", hodId);
     }
 
-    // Lookup churches and groups
+    // Join churches & groups
     pipeline.push(
-      { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
+      {
+        $lookup: {
+          from: "churches",
+          localField: "member.church",
+          foreignField: "_id",
+          as: "member.church",
+        },
+      },
       { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
-      { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
+      {
+        $lookup: {
+          from: "groups",
+          localField: "member.group",
+          foreignField: "_id",
+          as: "member.group",
+        },
+      },
       { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
     );
 
-    // Group stage
+    // Grouping per report type
     let groupStage = {};
     if (type === "member") {
       groupStage = {
@@ -408,9 +431,7 @@ export const getReports = async (req, res) => {
     console.log("🔹 Aggregation pipeline:", JSON.stringify(pipeline, null, 2));
 
     const report = await Giving.aggregate(pipeline);
-
     console.log("✅ Aggregation result count:", report.length);
-    if (!report.length) console.warn("⚠️ No matching givings found. Check 'arm' field and 'member.hod' mapping.");
 
     return res.json(report);
   } catch (err) {

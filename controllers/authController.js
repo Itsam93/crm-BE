@@ -32,7 +32,7 @@ export const loginUser = async (req, res) => {
       }
 
       const userId = uuidv4();
-      const token = jwt.sign({ id: userId, role }, JWT_SECRET, { expiresIn: "7d" });
+      const token = jwt.sign({ id: userId, role }, JWT_SECRET, { expiresIn: "1m" });
 
       return res.status(200).json({
         success: true,
