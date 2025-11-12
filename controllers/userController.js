@@ -1,9 +1,8 @@
 import User from "../models/User.js";
 
-// ✅ Get all users (optionally filtered by role)
 export const getUsers = async (req, res) => {
   try {
-    const { role } = req.query; // e.g. ?role=pastor
+    const { role } = req.query; 
 
     const query = { isActive: true };
     if (role) query.role = role;

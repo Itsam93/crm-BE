@@ -1,4 +1,3 @@
-// controllers/churchController.js
 import Church from "../models/Church.js";
 
 export const getChurches = async (req, res) => {

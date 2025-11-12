@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 
 /**
- * ✅ Verifies that the user is authenticated
+ * Verifies that the user is authenticated
  */
 export const requireAuth = (req, res, next) => {
   try {
@@ -34,7 +34,7 @@ export const requireAuth = (req, res, next) => {
 };
 
 /**
- * ✅ Restricts route access to specific roles
+ *  Restricts route access to specific roles
  */
 export const requireRole = (roles = []) => {
   return (req, res, next) => {
@@ -56,6 +56,6 @@ export const requireRole = (roles = []) => {
 };
 
 /**
- * ✅ Shortcut for admin-only routes
+ * Shortcut for admin-only routes
  */
 export const requireAdmin = requireRole(["admin"]);

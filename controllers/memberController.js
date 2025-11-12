@@ -4,7 +4,7 @@ import Church from "../models/Church.js";
 import fs from "fs";
 import XLSX from "xlsx";
 
-// ✅ Create new member
+// Create new member
 export const createMember = async (req, res) => {
   try {
     const { name, phone, birthday, kingschatId, group, church } = req.body;
@@ -32,7 +32,7 @@ export const createMember = async (req, res) => {
   }
 };
 
-// ✅ Get members with pagination, search, and filtering
+//  Get members with pagination, search, and filtering
 export const getMembers = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -60,7 +60,7 @@ export const getMembers = async (req, res) => {
   }
 };
 
-// ✅ Update member
+//  Update member
 export const updateMember = async (req, res) => {
   try {
     const { id } = req.params;
@@ -75,7 +75,7 @@ export const updateMember = async (req, res) => {
   }
 };
 
-// ✅ Soft delete member
+//  Soft delete member
 export const deleteMember = async (req, res) => {
   try {
     const { id } = req.params;

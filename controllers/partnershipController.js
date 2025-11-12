@@ -4,7 +4,7 @@ import Giving from "../models/Giving.js";
 import Church from "../models/Church.js";
 import Group from "../models/Group.js";
 
-// ✅ Add single daily giving
+//  Add single daily giving
 export const addGiving = async (req, res) => {
   try {
     const { memberName, amount, partnershipArm, date, churchId, groupId } = req.body;
@@ -39,7 +39,7 @@ export const addGiving = async (req, res) => {
   }
 };
 
-// ✅ Bulk upload givings
+// Bulk upload givings
 export const uploadGivingsBulk = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -102,7 +102,7 @@ export const uploadGivingsBulk = async (req, res) => {
   }
 };
 
-// ✅ Update a giving
+// Update a giving
 export const updateGiving = async (req, res) => {
   try {
     const { id } = req.params;
@@ -114,13 +114,46 @@ export const updateGiving = async (req, res) => {
   }
 };
 
-// ✅ Soft delete
+
 export const deleteGiving = async (req, res) => {
   try {
     const { id } = req.params;
-    await Giving.findByIdAndUpdate(id, { isDeleted: true });
-    res.json({ message: "Giving deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    const giving = await Giving.findByIdAndDelete(id); // Hard delete
+
+    if (!giving) return res.status(404).json({ message: "Giving not found" });
+
+    res.status(200).json({ message: "Giving deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting giving:", err);
+    res.status(500).json({ message: "Server error deleting giving" });
+  }
+};
+
+// Download endpoint: returns CSV
+export const downloadReportsCSV = async (req, res) => {
+  try {
+    const { type } = req.query;
+    const data = await getReportsInternal({ user: req.user, type });
+
+    // Convert Mongo aggregation result to CSV
+    const csv = parse(
+      data.map((row) => {
+        return {
+          id: row._id,
+          name: row.name || "TOTAL",
+          totalAmount: row.totalAmount,
+          church: row.church?.name || "",
+          group: row.group?.name || "",
+          arms: row.arms ? row.arms.map((a) => `${a.arm}:${a.amount}`).join("; ") : "",
+        };
+      })
+    );
+
+    res.header("Content-Type", "text/csv");
+    res.attachment(`report-${type}-${Date.now()}.csv`);
+    return res.send(csv);
+  } catch (err) {
+    console.error("downloadReportsCSV error:", err);
+    return res.status(500).json({ message: "Error generating CSV" });
   }
 };

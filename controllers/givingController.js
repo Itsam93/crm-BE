@@ -10,8 +10,14 @@ import Church from "../models/Church.js";
 
 const { Types } = mongoose;
 
-// ✅ Add single giving
-// ✅ Add single giving
+// Map HOD roles to arms
+const hodArmMap = {
+  healing_hod: "healing_school",
+  rhapsody_hod: "rhapsody",
+  ministry_hod: "ministry_programs",
+};
+
+// Add single giving
 export const addGiving = async (req, res) => {
   try {
     const { memberId, memberName, amount, arm, date, groupId, churchId } = req.body;
@@ -52,7 +58,7 @@ export const addGiving = async (req, res) => {
 };
 
 
-// ✅ Get all givings (with filters + pagination)
+// Get all givings (with filters + pagination)
 export const getGivings = async (req, res) => {
   try {
     const { page = 1, limit = 30, arm, groupId, churchId } = req.query;
@@ -126,7 +132,7 @@ export const getGivings = async (req, res) => {
   }
 };
 
-// ✅ Edit giving
+//  Edit giving
 export const updateGiving = async (req, res) => {
   try {
     const { id } = req.params;
@@ -162,7 +168,7 @@ export const updateGiving = async (req, res) => {
   }
 };
 
-// ✅ Soft delete giving
+// Soft delete giving
 export const deleteGiving = async (req, res) => {
   try {
     const { id } = req.params;
@@ -196,7 +202,7 @@ export const deleteGiving = async (req, res) => {
   }
 };
 
-// ✅ Restore giving
+// Restore giving
 export const restoreGiving = async (req, res) => {
   try {
     const { id } = req.params;
@@ -209,8 +215,7 @@ export const restoreGiving = async (req, res) => {
   }
 };
 
-// ✅ Bulk upload givings
-// ✅ Bulk upload givings
+// Bulk upload givings
 export const bulkUploadGivings = async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
@@ -283,7 +288,7 @@ export const bulkUploadGivings = async (req, res) => {
           .on("end", resolve)
           .on("error", reject);
       });
-      fs.unlink(req.file.path, () => {}); // clean up CSV file
+      fs.unlink(req.file.path, () => {}); 
     } else {
       const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -308,99 +313,42 @@ export const bulkUploadGivings = async (req, res) => {
 };
 
 
-// ✅ Reporting: top givers (members, groups, churches)
-export const getReports = async (req, res) => {
-  try {
-    let { type, hodId, partnershipArm } = req.query;
-    console.log("🔹 Incoming query params:", { type, hodId, partnershipArm });
+// Internal helper: runs the aggregation pipeline and returns data
+const getReportsInternal = async ({ user, type }) => {
+  const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
+  type = typeMap[type?.toLowerCase()];
+  if (!type) throw new Error("Invalid report type");
 
-    // Map frontend type to backend type
-    const typeMap = {
-      individual: "member",
-      member: "member",
-      group: "group",
-      church: "church",
+  // Filter HODs by their arm
+  let partnershipArm;
+  if (user?.role?.includes("_hod")) {
+    const hodArmMap = {
+      healing_hod: "healing_school",
+      rhapsody_hod: "rhapsody",
+      ministry_hod: "ministry_programs",
     };
-    type = typeMap[type?.toLowerCase()];
-    console.log("ℹ️ Mapped report type:", type);
+    partnershipArm = hodArmMap[user.role];
+  }
 
-    if (!type) {
-      console.warn("⚠️ Invalid report type");
-      return res.status(400).json({ message: "Invalid report type" });
-    }
+  const match = { deleted: false };
+  if (partnershipArm) match.arm = { $regex: new RegExp(`^${partnershipArm}$`, "i") };
 
-    // Auto-restrict HODs
-    if (req.user && req.user.role?.includes("_hod")) {
-      hodId = req.user.id;
-      console.log("ℹ️ Auto-restrict HOD detected. hodId set to:", hodId);
+  const pipeline = [{ $match: match }];
 
-      // Automatically get partnership arm from role if not provided
-      if (!partnershipArm) {
-        partnershipArm = req.user.role.split("_")[0]; // e.g., "rhapsody_hod" => "rhapsody"
-        console.log("ℹ️ Partnership arm inferred from role:", partnershipArm);
-      }
-    }
+  // Lookup member, church, group
+  pipeline.push(
+    { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
+    { $unwind: "$member" },
+    { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
+    { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
+    { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
+    { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
+  );
 
-    // Base match: non-deleted
-    const match = { deleted: false };
-
-    // Filter by partnership arm (case-insensitive) if provided
-    if (partnershipArm) {
-     match.arm = { $regex: new RegExp(`^${partnershipArm}$`, "i") };
-
-      console.log("ℹ️ Filtering by partnership arm (case-insensitive):", partnershipArm);
-    }
-
-    console.log("ℹ️ MongoDB match object:", match);
-
-    const pipeline = [{ $match: match }];
-
-    // Join members
-    pipeline.push(
-      {
-        $lookup: {
-          from: "members",
-          localField: "member",
-          foreignField: "_id",
-          as: "member",
-        },
-      },
-      { $unwind: "$member" }
-    );
-
-    // Filter by HOD (convert to ObjectId)
-    if (hodId) {
-      pipeline.push({
-        $match: { "member.hod": new Types.ObjectId(hodId) },
-      });
-      console.log("ℹ️ Filtering by HOD ID in aggregation pipeline:", hodId);
-    }
-
-    // Join churches & groups
-    pipeline.push(
-      {
-        $lookup: {
-          from: "churches",
-          localField: "member.church",
-          foreignField: "_id",
-          as: "member.church",
-        },
-      },
-      { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
-      {
-        $lookup: {
-          from: "groups",
-          localField: "member.group",
-          foreignField: "_id",
-          as: "member.group",
-        },
-      },
-      { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
-    );
-
-    // Grouping per report type
-    let groupStage = {};
-    if (type === "member") {
+  // Group stage
+  let groupStage = {};
+  switch (type) {
+    case "member":
       groupStage = {
         _id: "$member._id",
         name: { $first: "$member.name" },
@@ -409,33 +357,82 @@ export const getReports = async (req, res) => {
         church: { $first: "$member.church" },
         group: { $first: "$member.group" },
       };
-    } else if (type === "church") {
+      break;
+    case "church":
       groupStage = {
         _id: "$member.church._id",
         name: { $first: "$member.church.name" },
         totalAmount: { $sum: "$amount" },
         arms: { $push: { arm: "$arm", amount: "$amount" } },
+        group: { $first: "$member.church.group" },
       };
-    } else if (type === "group") {
+      break;
+    case "group":
       groupStage = {
         _id: "$member.group._id",
         name: { $first: "$member.group.name" },
         totalAmount: { $sum: "$amount" },
         arms: { $push: { arm: "$arm", amount: "$amount" } },
       };
+      break;
+  }
+
+  pipeline.push({ $group: groupStage });
+  pipeline.push({ $sort: { totalAmount: -1 } });
+
+  return await Giving.aggregate(pipeline);
+};
+
+// Unified endpoint
+export const getReports = async (req, res) => {
+  try {
+    const { type } = req.query;
+    const data = await getReportsInternal({ user: req.user, type });
+
+    // Optional: send HOD arm total if HOD
+    let armTotal;
+    if (req.user.role.includes("_hod")) {
+      const arm = req.user.role.split("_")[0];
+      const armTotalAgg = await Giving.aggregate([
+        { $match: { deleted: false, arm: { $regex: new RegExp(`^${arm}$`, "i") } } },
+        { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
+      ]);
+      armTotal = armTotalAgg[0]?.totalAmount || 0;
     }
 
-    pipeline.push({ $group: groupStage });
-    pipeline.push({ $sort: { totalAmount: -1 } });
-
-    console.log("🔹 Aggregation pipeline:", JSON.stringify(pipeline, null, 2));
-
-    const report = await Giving.aggregate(pipeline);
-    console.log("✅ Aggregation result count:", report.length);
-
-    return res.json(report);
+    return res.json({ data, armTotal });
   } catch (err) {
-    console.error("❌ Error generating reports:", err);
+    console.error("getReports error:", err);
     return res.status(500).json({ message: err.message || "Server error" });
+  }
+};
+
+
+// Download endpoint: returns CSV
+export const downloadReportsCSV = async (req, res) => {
+  try {
+    const { type } = req.query;
+    const data = await getReportsInternal({ user: req.user, type });
+
+    // Convert Mongo aggregation result to CSV
+    const csv = parse(
+      data.map((row) => {
+        return {
+          id: row._id,
+          name: row.name || "TOTAL",
+          totalAmount: row.totalAmount,
+          church: row.church?.name || "",
+          group: row.group?.name || "",
+          arms: row.arms ? row.arms.map((a) => `${a.arm}:${a.amount}`).join("; ") : "",
+        };
+      })
+    );
+
+    res.header("Content-Type", "text/csv");
+    res.attachment(`report-${type}-${Date.now()}.csv`);
+    return res.send(csv);
+  } catch (err) {
+    console.error("downloadReportsCSV error:", err);
+    return res.status(500).json({ message: "Error generating CSV" });
   }
 };

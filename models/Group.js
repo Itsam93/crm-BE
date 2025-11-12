@@ -9,7 +9,7 @@ const groupSchema = new mongoose.Schema(
     },
     totalGiving: { type: Number, default: 0 },
 
-    // ⬇️ Changed pastor from ObjectId → String
+    // Changed pastor from ObjectId → String
     pastor: {
       type: String,
       trim: true,

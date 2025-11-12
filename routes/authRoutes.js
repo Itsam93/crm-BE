@@ -1,17 +1,16 @@
-// routes/authRoutes.js
 import express from "express";
 import { loginUser, verifyUser } from "../controllers/authController.js";
 import { requireAuth, requireRole } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ✅ Login route
+//  Login route
 router.post("/login", loginUser);
 
-// ✅ Verify token route
+// Verify token route
 router.get("/verify", requireAuth, verifyUser);
 
-// ✅ Dashboard routes
+// Dashboard routes
 router.get(
   "/admin/dashboard",
   requireAuth,

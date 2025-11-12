@@ -14,14 +14,20 @@ export const getAdminSummary = async (req, res) => {
     ]);
 
     const givingsAgg = await Giving.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: "$amount" },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
+  {
+    $match: {
+      amount: { $exists: true, $ne: null },
+      deleted: false, 
+    },
+  },
+  {
+    $group: {
+      _id: null,
+      totalAmount: { $sum: "$amount" },
+      count: { $sum: 1 },
+    },
+  },
+]);
 
     const totalGivingsAmount = givingsAgg[0]?.totalAmount || 0;
     const totalGivingsCount = givingsAgg[0]?.count || 0;
@@ -42,7 +48,7 @@ export const getAdminSummary = async (req, res) => {
 // ===== Group Management =====
 const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-// 🟢 Create a new group
+//  Create a new group
 export const createGroup = async (req, res) => {
   try {
     let { group_name, pastor } = req.body;
@@ -83,7 +89,7 @@ export const createGroup = async (req, res) => {
   }
 };
 
-// 🟡 Update a group
+// Update a group
 export const updateGroup = async (req, res) => {
   try {
     const { group_name, pastor } = req.body;
@@ -135,7 +141,7 @@ export const getGroups = async (req, res) => {
   }
 };
 
-// 🔴 Delete a group
+// Delete a group
 export const deleteGroup = async (req, res) => {
   try {
     const { id } = req.params;

@@ -11,7 +11,7 @@ const partnerSchema = new mongoose.Schema(
     partnershipArm: {
       type: String,
       required: true,
-      trim: true, // e.g. "Healing", "Rhapsody", "Ministry"
+      trim: true, 
     },
 
     church: {

@@ -1,4 +1,3 @@
-// routes/adminRoutes.js
 import express from "express";
 import {
   getGroups,
@@ -15,13 +14,13 @@ import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// ✅ All admin routes are protected
+// All admin routes are protected
 router.use(requireAuth, requireAdmin);
 
 // ===== Admin Dashboard =====
 router.get("/summary", getAdminSummary);
 
-// ✅ Upcoming Birthdays
+//  Upcoming Birthdays
 router.get("/upcoming-birthdays", getUpcomingBirthdays);
 
 // ===== Group Routes =====

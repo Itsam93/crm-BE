@@ -4,6 +4,6 @@ import { requireAuth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.get("/", requireAuth, getUsers); // e.g. /api/users?role=pastor
+router.get("/", requireAuth, getUsers); 
 
 export default router;
