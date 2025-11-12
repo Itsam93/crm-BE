@@ -15,7 +15,6 @@ async function seedHODs() {
     const db = client.db("church_giving_db");
     const usersCollection = db.collection("users");
 
-    // Remove documents with null username/email to avoid duplicate key errors
     await usersCollection.deleteMany({ $or: [{ email: null }, { username: null }] });
 
     const hods = [

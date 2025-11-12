@@ -56,7 +56,7 @@ export const loginUser = async (req, res) => {
       const isMatch = await bcrypt.compare(password.trim(), hodUser.password);
       if (!isMatch) return res.status(401).json({ message: "Incorrect password for the selected role" });
 
-      const token = jwt.sign({ id: hodUser._id.toString(), role: hodUser.role }, JWT_SECRET, { expiresIn: "1m" });
+      const token = jwt.sign({ id: hodUser._id.toString(), role: hodUser.role }, JWT_SECRET, { expiresIn: "7d" });
 
       return res.status(200).json({
         success: true,
