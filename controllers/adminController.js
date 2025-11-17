@@ -162,33 +162,114 @@ export const deleteGroup = async (req, res) => {
 export const getUpcomingBirthdays = async (req, res) => {
   try {
     const members = await Member.find({ deleted: false })
-      .populate("group", "group_name")
+      .populate("group", "name")
       .populate("church", "name");
 
     const now = new Date();
     const currentMonth = now.getMonth() + 1;
     const today = now.getDate();
+    const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
 
-    // Filter for birthdays in current and next month
     const upcoming = members
       .filter((m) => {
         if (!m.birthday) return false;
         const bd = new Date(m.birthday);
         const month = bd.getMonth() + 1;
         const day = bd.getDate();
-
-        // show this month and early next month birthdays
-        const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
-        return (
-          (month === currentMonth && day >= today) ||
-          (month === nextMonth && day <= 10)
-        );
+        return (month === currentMonth && day >= today) || (month === nextMonth && day <= 10);
       })
-      .sort((a, b) => new Date(a.birthday) - new Date(b.birthday));
+      .map((m) => ({
+        id: m._id.toString(),
+        name: m.name,
+        birthday: m.birthday,
+        group: m.group ? { name: m.group.name } : { name: "—" },
+        church: m.church ? { name: m.church.name } : { name: "—" },
+      }))
+      .sort((a, b) => {
+        const aMD = new Date(2000, new Date(a.birthday).getMonth(), new Date(a.birthday).getDate());
+        const bMD = new Date(2000, new Date(b.birthday).getMonth(), new Date(b.birthday).getDate());
+        return aMD - bMD;
+      });
 
     res.json(upcoming);
   } catch (err) {
     console.error("Error fetching upcoming birthdays:", err);
     res.status(500).json({ message: "Server error fetching birthdays" });
+  }
+};
+
+
+export const getRecentGivings = async (req, res) => {
+  try {
+    const recent = await Giving.find({ deleted: false })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .populate("member", "name")
+      .populate("church", "name")
+      .populate("group", "name");
+
+    const formatted = recent.map((g) => ({
+      memberName: g.member?.name || "—",
+      churchName: g.church?.name || "—",
+      groupName: g.group?.name || "—",
+      partnershipArm: g.partnershipArm || "—",
+      amount: g.amount,
+      date: g.createdAt,
+    }));
+
+    res.json(formatted);
+  } catch (err) {
+    console.error("Error fetching recent givings:", err);
+    res.status(500).json({ message: "Server error fetching recent givings" });
+  }
+};
+
+
+export const getTopPartners = async (req, res) => {
+  try {
+    // Top Individuals
+    const topIndividuals = await Giving.aggregate([
+      { $match: { deleted: false, member: { $exists: true } } },
+      { $group: { _id: "$member", totalAmount: { $sum: "$amount" } } },
+      { $sort: { totalAmount: -1 } },
+      { $limit: 5 },
+    ]);
+
+    // Top Churches
+    const topChurches = await Giving.aggregate([
+      { $match: { deleted: false, church: { $exists: true } } },
+      { $group: { _id: "$church", totalAmount: { $sum: "$amount" } } },
+      { $sort: { totalAmount: -1 } },
+      { $limit: 5 },
+    ]);
+
+    // Top Groups
+    const topGroups = await Giving.aggregate([
+      { $match: { deleted: false, group: { $exists: true } } },
+      { $group: { _id: "$group", totalAmount: { $sum: "$amount" } } },
+      { $sort: { totalAmount: -1 } },
+      { $limit: 5 },
+    ]);
+
+    // Populate names
+    const populateName = async (arr, model) => {
+      const result = [];
+      for (let item of arr) {
+        const doc = await model.findById(item._id);
+        result.push({ name: doc?.name || "—", totalAmount: item.totalAmount });
+      }
+      return result;
+    };
+
+    const [individuals, churches, groups] = await Promise.all([
+      populateName(topIndividuals, Member),
+      populateName(topChurches, Church),
+      populateName(topGroups, Group),
+    ]);
+
+    res.json({ individuals, churches, groups });
+  } catch (err) {
+    console.error("Error fetching top partners:", err);
+    res.status(500).json({ message: "Server error fetching top partners" });
   }
 };

@@ -6,10 +6,11 @@ import {
   deleteGroup,
   getAdminSummary,
   getUpcomingBirthdays,
+  getRecentGivings,
+  getTopPartners,
 } from "../controllers/adminController.js";
 
 import churchRoutes from "./churchRoutes.js";
-
 import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -20,8 +21,14 @@ router.use(requireAuth, requireAdmin);
 // ===== Admin Dashboard =====
 router.get("/summary", getAdminSummary);
 
-//  Upcoming Birthdays
+// Upcoming Birthdays
 router.get("/upcoming-birthdays", getUpcomingBirthdays);
+
+// Recent Givings
+router.get("/recent-givings", getRecentGivings);
+
+// Top Partners
+router.get("/top-partners", getTopPartners);
 
 // ===== Group Routes =====
 router.get("/groups", getGroups);
