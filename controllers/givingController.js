@@ -168,17 +168,19 @@ export const updateGiving = async (req, res) => {
   }
 };
 
-// Soft delete giving
+// Hard delete giving (ONLY delete-related logic changed)
 export const deleteGiving = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Perform HARD DELETE
     const deletedGiving = await Giving.findByIdAndDelete(id);
+
     if (!deletedGiving) {
       return res.status(404).json({ message: "Giving not found" });
     }
 
-    // 🔁 Recalculate summary totals
+    // Recalculate totals (still correct for hard delete)
     const givingsAgg = await Giving.aggregate([
       {
         $group: {
@@ -201,6 +203,7 @@ export const deleteGiving = async (req, res) => {
     res.status(500).json({ message: "Server error while deleting giving" });
   }
 };
+
 
 // Restore giving
 export const restoreGiving = async (req, res) => {
