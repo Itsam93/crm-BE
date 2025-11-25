@@ -317,24 +317,30 @@ export const bulkUploadGivings = async (req, res) => {
 
 
 // Internal helper: runs the aggregation pipeline and returns data
+// Internal helper: runs the aggregation pipeline and returns data
 const getReportsInternal = async ({ user, type }) => {
   const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
   type = typeMap[type?.toLowerCase()];
   if (!type) throw new Error("Invalid report type");
 
-  // Filter HODs by their arm
+  // Normalize HOD roles to match DB arm values
   let partnershipArm;
   if (user?.role?.includes("_hod")) {
-    const hodArmMap = {
-      healing_hod: "healing_school",
-      rhapsody_hod: "rhapsody",
-      ministry_hod: "ministry_programs",
+    // Use lowercase for consistency
+    const armValueMap = {
+      healing_hod: "Healing",
+      rhapsody_hod: "Rhapsody",
+      ministry_hod: "Ministry",
     };
-    partnershipArm = hodArmMap[user.role];
+    partnershipArm = armValueMap[user.role];
   }
 
+  // Base match for givings
   const match = { deleted: false };
-  if (partnershipArm) match.arm = { $regex: new RegExp(`^${partnershipArm}$`, "i") };
+  if (partnershipArm) {
+    // Case-insensitive match, allow minor variations in DB
+    match.arm = { $regex: new RegExp(`^${partnershipArm}$`, "i") };
+  }
 
   const pipeline = [{ $match: match }];
 
@@ -348,7 +354,7 @@ const getReportsInternal = async ({ user, type }) => {
     { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
   );
 
-  // Group stage
+  // Group stage based on report type
   let groupStage = {};
   switch (type) {
     case "member":
@@ -361,6 +367,7 @@ const getReportsInternal = async ({ user, type }) => {
         group: { $first: "$member.group" },
       };
       break;
+
     case "church":
       groupStage = {
         _id: "$member.church._id",
@@ -370,6 +377,7 @@ const getReportsInternal = async ({ user, type }) => {
         group: { $first: "$member.church.group" },
       };
       break;
+
     case "group":
       groupStage = {
         _id: "$member.group._id",
@@ -383,8 +391,10 @@ const getReportsInternal = async ({ user, type }) => {
   pipeline.push({ $group: groupStage });
   pipeline.push({ $sort: { totalAmount: -1 } });
 
-  return await Giving.aggregate(pipeline);
+  const data = await Giving.aggregate(pipeline);
+  return data;
 };
+
 
 // Unified endpoint
 export const getReports = async (req, res) => {
