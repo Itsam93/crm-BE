@@ -12,7 +12,7 @@ const { Types } = mongoose;
 
 // Map HOD roles to arms
 const hodArmMap = {
-  healing_hod: "healing_school",
+  healing_hod: "healing School",
   rhapsody_hod: "rhapsody",
   ministry_hod: "ministry_programs",
 };
@@ -317,32 +317,48 @@ export const bulkUploadGivings = async (req, res) => {
 
 
 // Internal helper: runs the aggregation pipeline and returns data
-// Internal helper: runs the aggregation pipeline and returns data
-const getReportsInternal = async ({ user, type }) => {
+const getReportsInternal = async ({ user, type, from, to }) => {
   const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
   type = typeMap[type?.toLowerCase()];
   if (!type) throw new Error("Invalid report type");
 
-  // Normalize HOD roles to match DB arm values
+  // Normalize HOD arm
   let partnershipArm;
   if (user?.role?.includes("_hod")) {
-    // Use lowercase for consistency
-    const armValueMap = {
-      healing_hod: "Healing",
-      rhapsody_hod: "Rhapsody",
-      ministry_hod: "Ministry",
+    const roleMap = {
+      healing_hod: "healing_school",
+      rhapsody_hod: "rhapsody",
+      ministry_hod: "ministry_programs",
     };
-    partnershipArm = armValueMap[user.role];
+    partnershipArm = roleMap[user.role];
   }
 
   // Base match for givings
   const match = { deleted: false };
-  if (partnershipArm) {
-    // Case-insensitive match, allow minor variations in DB
-    match.arm = { $regex: new RegExp(`^${partnershipArm}$`, "i") };
+
+  // Add date filters
+  if (from || to) {
+    match.createdAt = {};
+    if (from) match.createdAt.$gte = new Date(from);
+    if (to) match.createdAt.$lte = new Date(to);
   }
 
-  const pipeline = [{ $match: match }];
+  const pipeline = [
+    // Normalize arm field
+    {
+      $addFields: {
+        normalizedArm: {
+          $replaceAll: {
+            input: { $toLower: "$arm" },
+            find: " ",
+            replacement: "_",
+          },
+        },
+      },
+    },
+    // Match HOD arm + deleted + date
+    { $match: { ...match, ...(partnershipArm ? { normalizedArm: partnershipArm } : {}) } },
+  ];
 
   // Lookup member, church, group
   pipeline.push(
@@ -354,42 +370,41 @@ const getReportsInternal = async ({ user, type }) => {
     { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
   );
 
-  // Group stage based on report type
+  // Group by report type
   let groupStage = {};
   switch (type) {
     case "member":
       groupStage = {
         _id: "$member._id",
         name: { $first: "$member.name" },
+        phone: { $first: "$member.phone" },
         totalAmount: { $sum: "$amount" },
         arms: { $push: { arm: "$arm", amount: "$amount" } },
         church: { $first: "$member.church" },
         group: { $first: "$member.group" },
       };
       break;
-
     case "church":
       groupStage = {
         _id: "$member.church._id",
         name: { $first: "$member.church.name" },
         totalAmount: { $sum: "$amount" },
         arms: { $push: { arm: "$arm", amount: "$amount" } },
-        group: { $first: "$member.church.group" },
+        group: { $first: "$member.group" },
       };
       break;
-
     case "group":
       groupStage = {
         _id: "$member.group._id",
         name: { $first: "$member.group.name" },
         totalAmount: { $sum: "$amount" },
         arms: { $push: { arm: "$arm", amount: "$amount" } },
+        group: { $first: "$member.group" },
       };
       break;
   }
 
-  pipeline.push({ $group: groupStage });
-  pipeline.push({ $sort: { totalAmount: -1 } });
+  pipeline.push({ $group: groupStage }, { $sort: { totalAmount: -1 } });
 
   const data = await Giving.aggregate(pipeline);
   return data;
@@ -399,17 +414,46 @@ const getReportsInternal = async ({ user, type }) => {
 // Unified endpoint
 export const getReports = async (req, res) => {
   try {
-    const { type } = req.query;
-    const data = await getReportsInternal({ user: req.user, type });
+    const { type, from, to } = req.query;
+
+    // Pass date filters to internal function
+    const data = await getReportsInternal({ user: req.user, type, from, to });
 
     // Optional: send HOD arm total if HOD
     let armTotal;
     if (req.user.role.includes("_hod")) {
-      const arm = req.user.role.split("_")[0];
+      // Normalize HOD arm like we did in getReportsInternal
+      const roleMap = {
+        healing_hod: "healing_school",
+        rhapsody_hod: "rhapsody",
+        ministry_hod: "ministry_programs",
+      };
+      const partnershipArm = roleMap[req.user.role];
+
+      // Normalize arm field in DB and match + date filters
+      const match = { deleted: false, normalizedArm: partnershipArm };
+      if (from || to) {
+        match.createdAt = {};
+        if (from) match.createdAt.$gte = new Date(from);
+        if (to) match.createdAt.$lte = new Date(to);
+      }
+
       const armTotalAgg = await Giving.aggregate([
-        { $match: { deleted: false, arm: { $regex: new RegExp(`^${arm}$`, "i") } } },
+        {
+          $addFields: {
+            normalizedArm: {
+              $replaceAll: {
+                input: { $toLower: "$arm" },
+                find: " ",
+                replacement: "_",
+              },
+            },
+          },
+        },
+        { $match: match },
         { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
       ]);
+
       armTotal = armTotalAgg[0]?.totalAmount || 0;
     }
 
@@ -419,6 +463,8 @@ export const getReports = async (req, res) => {
     return res.status(500).json({ message: err.message || "Server error" });
   }
 };
+
+
 
 
 // Download endpoint: returns CSV
