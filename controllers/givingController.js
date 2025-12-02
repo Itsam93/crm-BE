@@ -10,12 +10,31 @@ import Church from "../models/Church.js";
 
 const { Types } = mongoose;
 
+const normalizeArm = (value) => {
+  if (!value) return "Rhapsody";
+
+  const key = value.toLowerCase().trim().replace(/\s+/g, "_");
+
+  const map = {
+    rhapsody: "Rhapsody",
+    healing_school: "Healing School",
+    ministry_programs: "Ministry Programs",
+    loveworld_bibles: "Loveworld Bibles",
+    innercity_missions: "Innercity Missions",
+  };
+
+  return map[key] || "Rhapsody";
+};
+
 // Map HOD roles to arms
 const hodArmMap = {
   healing_hod: "healing School",
   rhapsody_hod: "rhapsody",
   ministry_hod: "ministry_programs",
+  bibles_hod: "loveworld_bibles",
+  innercity_hod: "innercity_missions"
 };
+
 
 // Add single giving
 export const addGiving = async (req, res) => {
@@ -381,6 +400,8 @@ const getReportsInternal = async ({ user, type, from, to }) => {
       healing_hod: "healing_school",
       rhapsody_hod: "rhapsody",
       ministry_hod: "ministry_programs",
+      bibles_hod: "loveworld_bibles",
+      innercity_hod: "innercity_missions",
     };
     partnershipArm = roleMap[user.role];
   }
@@ -479,6 +500,8 @@ export const getReports = async (req, res) => {
         healing_hod: "healing_school",
         rhapsody_hod: "rhapsody",
         ministry_hod: "ministry_programs",
+        bibles_hod: "loveworld_bibles",
+        innercity_hod: "innercity_missions",
       };
       const partnershipArm = roleMap[req.user.role];
 
