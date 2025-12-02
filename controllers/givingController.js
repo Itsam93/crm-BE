@@ -20,7 +20,7 @@ const hodArmMap = {
 // Add single giving
 export const addGiving = async (req, res) => {
   try {
-    const { memberId, memberName, amount, arm, date, groupId, churchId } = req.body;
+    const { memberId, memberName, amount, arm, groupId, churchId } = req.body;
 
     if ((!memberId && !memberName) || !amount || !arm)
       return res.status(400).json({ message: "Missing required fields" });
@@ -32,14 +32,10 @@ export const addGiving = async (req, res) => {
       member = await Member.findById(memberId);
       if (!member) return res.status(404).json({ message: "Member not found" });
     } else {
-      // Find by name or create new member
+      // Find by name only, do NOT create new member
       member = await Member.findOne({ name: memberName });
       if (!member) {
-        member = await Member.create({
-          name: memberName,
-          group: groupId ? new Types.ObjectId(groupId) : null,
-          church: churchId ? new Types.ObjectId(churchId) : null,
-        });
+        return res.status(404).json({ message: "Member not found in the database" });
       }
     }
 
@@ -47,13 +43,13 @@ export const addGiving = async (req, res) => {
       member: member._id,
       amount,
       arm,
-      date: date ? new Date(date) : new Date(),
+      date: req.body.date ? new Date(req.body.date) : new Date(),
     });
 
     res.status(201).json({ message: "Giving added successfully", giving });
   } catch (err) {
-    console.error("addGiving error:", err);
-    res.status(500).json({ message: err.message });
+    console.error("addGiving error:", err.message);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -61,38 +57,78 @@ export const addGiving = async (req, res) => {
 // Get all givings (with filters + pagination)
 export const getGivings = async (req, res) => {
   try {
-    const { page = 1, limit = 30, arm, groupId, churchId } = req.query;
+    let { page = 1, limit = 30, arm, groupId, churchId } = req.query;
     let { hodId, q, from, to } = req.query;
 
-    // Automatically filter by HOD if the user is a HOD
-    if (req.user && req.user.role && req.user.role.includes("_hod")) {
+    // Support custom limit: "all"
+    const returnAll = limit === "all";
+
+    // Auto-filter for HOD
+    if (req.user?.role?.includes("_hod")) {
       hodId = req.user.id;
     }
 
     // Base match
     const match = { deleted: false };
+
     if (arm) match.arm = arm;
+
     if (from || to) {
       match.date = {};
       if (from) match.date.$gte = new Date(from);
       if (to) match.date.$lte = new Date(to);
     }
-    if (q) match["member.name"] = { $regex: new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") };
+
+    if (q) {
+      match["member.name"] = {
+        $regex: new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+      };
+    }
 
     const objectFilters = {};
     if (groupId) objectFilters["member.group"] = new Types.ObjectId(groupId);
     if (churchId) objectFilters["member.church"] = new Types.ObjectId(churchId);
     if (hodId) objectFilters["member.hod"] = new Types.ObjectId(hodId);
 
+    // Base pipeline
     const pipeline = [
       { $match: match },
-      { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
+
+      // Get member
+      { 
+        $lookup: { 
+          from: "members",
+          localField: "member",
+          foreignField: "_id",
+          as: "member"
+        }
+      },
       { $unwind: "$member" },
+
       { $match: objectFilters },
-      { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
+
+      // Get church
+      {
+        $lookup: {
+          from: "churches",
+          localField: "member.church",
+          foreignField: "_id",
+          as: "member.church"
+        }
+      },
       { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
-      { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
+
+      // Get group
+      {
+        $lookup: {
+          from: "groups",
+          localField: "member.group",
+          foreignField: "_id",
+          as: "member.group"
+        }
+      },
       { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
+
       {
         $project: {
           amount: 1,
@@ -108,22 +144,37 @@ export const getGivings = async (req, res) => {
           "member.group.name": 1,
         },
       },
+
       { $sort: { date: -1 } },
     ];
 
-    const total = (await Giving.aggregate([...pipeline, { $count: "total" }]))[0]?.total || 0;
-    const skip = (Number(page) - 1) * Number(limit);
-    pipeline.push({ $skip: skip }, { $limit: Number(limit) });
+    // total count BEFORE pagination
+    const total =
+      (await Giving.aggregate([...pipeline, { $count: "total" }]))[0]?.total || 0;
 
-    const rows = await Giving.aggregate(pipeline);
+    let rows;
+
+    // If limit = "all", return everything
+    if (returnAll) {
+      rows = await Giving.aggregate(pipeline);
+    } else {
+      // Normal pagination
+      limit = Number(limit);
+      page = Number(page);
+
+      const skip = (page - 1) * limit;
+      pipeline.push({ $skip: skip }, { $limit: limit });
+
+      rows = await Giving.aggregate(pipeline);
+    }
 
     return res.json({
       data: rows,
       meta: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit) || 1),
+        page: returnAll ? 1 : page,
+        limit: returnAll ? "all" : limit,
+        totalPages: returnAll ? 1 : Math.ceil(total / limit),
       },
     });
   } catch (err) {
@@ -131,6 +182,7 @@ export const getGivings = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
 
 //  Edit giving
 export const updateGiving = async (req, res) => {
