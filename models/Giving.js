@@ -9,7 +9,7 @@ const givingSchema = new mongoose.Schema(
     date: { type: Date, default: Date.now },
     arm: {
       type: String,
-      enum: ["Rhapsody", "Healing School", "Ministry Programs", "Innercity Missions", "Loveworld Bibles"],
+      enum: ["Rhapsody", "Healing School", "Ministry Programs", "Innercity Missions", "Loveworld Bibles", "LWPM",],
       required: true,
     },
     deleted: { type: Boolean, default: false },

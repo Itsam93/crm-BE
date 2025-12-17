@@ -21,6 +21,7 @@ const normalizeArm = (value) => {
     ministry_programs: "Ministry Programs",
     loveworld_bibles: "Loveworld Bibles",
     innercity_missions: "Innercity Missions",
+    lwpm: "LWPM",
   };
 
   return map[key] || "Rhapsody";
@@ -32,7 +33,8 @@ const hodArmMap = {
   rhapsody_hod: "rhapsody",
   ministry_hod: "ministry_programs",
   bibles_hod: "loveworld_bibles",
-  innercity_hod: "innercity_missions"
+  innercity_hod: "innercity_missions",
+  lwpm_hod: "LWPM"
 };
 
 
@@ -402,6 +404,7 @@ const getReportsInternal = async ({ user, type, from, to }) => {
       ministry_hod: "ministry_programs",
       bibles_hod: "loveworld_bibles",
       innercity_hod: "innercity_missions",
+      lwpm_hod: "LWPM_hod",
     };
     partnershipArm = roleMap[user.role];
   }
@@ -502,6 +505,7 @@ export const getReports = async (req, res) => {
         ministry_hod: "ministry_programs",
         bibles_hod: "loveworld_bibles",
         innercity_hod: "innercity_missions",
+        lwpm_hos: "LWPM_hod",
       };
       const partnershipArm = roleMap[req.user.role];
 
