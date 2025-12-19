@@ -165,31 +165,49 @@ export const getUpcomingBirthdays = async (req, res) => {
       .populate("group", "name")
       .populate("church", "name");
 
-    const now = new Date();
-    const currentMonth = now.getMonth() + 1;
-    const today = now.getDate();
-    const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const tenDaysFromNow = new Date(today);
+    tenDaysFromNow.setDate(today.getDate() + 10);
 
     const upcoming = members
-      .filter((m) => {
-        if (!m.birthday) return false;
-        const bd = new Date(m.birthday);
-        const month = bd.getMonth() + 1;
-        const day = bd.getDate();
-        return (month === currentMonth && day >= today) || (month === nextMonth && day <= 10);
+      .map((m) => {
+        if (!m.birthday) return null;
+
+        const birthDate = new Date(m.birthday);
+
+        // Normalize birthday to this year
+        let nextBirthday = new Date(
+          today.getFullYear(),
+          birthDate.getMonth(),
+          birthDate.getDate()
+        );
+
+        // If birthday already passed this year, move to next year
+        if (nextBirthday < today) {
+          nextBirthday.setFullYear(today.getFullYear() + 1);
+        }
+
+        // Outside 10-day window
+        if (nextBirthday > tenDaysFromNow) return null;
+
+        const diffMs = nextBirthday.getTime() - today.getTime();
+        const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        return {
+          id: m._id.toString(),
+          name: m.name,
+          birthday: m.birthday,
+          daysRemaining,
+          isToday: daysRemaining === 0,
+          group: m.group ? { name: m.group.name } : { name: "—" },
+          church: m.church ? { name: m.church.name } : { name: "—" },
+        };
       })
-      .map((m) => ({
-        id: m._id.toString(),
-        name: m.name,
-        birthday: m.birthday,
-        group: m.group ? { name: m.group.name } : { name: "—" },
-        church: m.church ? { name: m.church.name } : { name: "—" },
-      }))
-      .sort((a, b) => {
-        const aMD = new Date(2000, new Date(a.birthday).getMonth(), new Date(a.birthday).getDate());
-        const bMD = new Date(2000, new Date(b.birthday).getMonth(), new Date(b.birthday).getDate());
-        return aMD - bMD;
-      });
+      .filter(Boolean)
+      .sort((a, b) => a.daysRemaining - b.daysRemaining)
+      .slice(0, 10); 
 
     res.json(upcoming);
   } catch (err) {
@@ -271,5 +289,168 @@ export const getTopPartners = async (req, res) => {
   } catch (err) {
     console.error("Error fetching top partners:", err);
     res.status(500).json({ message: "Server error fetching top partners" });
+  }
+};
+
+
+// ==========================
+// TREND ANALYSIS
+// ==========================
+
+// Helper: format date label based on period
+const formatLabel = (date, period) => {
+  const d = new Date(date);
+  switch (period) {
+    case "daily":
+      return d.toISOString().slice(0, 10); // YYYY-MM-DD
+    case "weekly":
+      const weekStart = new Date(d);
+      weekStart.setDate(d.getDate() - d.getDay()); // Sunday
+      return weekStart.toISOString().slice(0, 10);
+    case "monthly":
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    case "quarterly":
+      const quarter = Math.floor(d.getMonth() / 3) + 1;
+      return `${d.getFullYear()}-Q${quarter}`;
+    default:
+      return d.toISOString().slice(0, 10);
+  }
+};
+
+// 1️⃣ Givings Trend
+export const getGivingsTrend = async (req, res) => {
+  try {
+    const period = req.query.period || "daily";
+
+    const givings = await Giving.aggregate([
+      { $match: { deleted: false, amount: { $exists: true } } },
+      {
+        $group: {
+          _id: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: [period, "daily"] },
+                  then: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                },
+                {
+                  case: { $eq: [period, "weekly"] },
+                  then: { $isoWeek: "$createdAt" },
+                },
+                {
+                  case: { $eq: [period, "monthly"] },
+                  then: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+                },
+                {
+                  case: { $eq: [period, "quarterly"] },
+                  then: { $concat: [
+                    { $toString: { $year: "$createdAt" } },
+                    "-Q",
+                    { $toString: { $ceil: { $divide: [{ $add: [{ $month: "$createdAt" }, 0] }, 3] } } }
+                  ] },
+                },
+              ],
+              default: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            },
+          },
+          totalAmount: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { "_id": 1 } },
+    ]);
+
+    res.status(200).json(givings.map(g => ({ label: g._id, amount: g.totalAmount, count: g.count })));
+  } catch (err) {
+    console.error("Error in getGivingsTrend:", err);
+    res.status(500).json({ message: "Server error fetching givings trend" });
+  }
+};
+
+// 2️⃣ Partners Trend
+export const getPartnersTrend = async (req, res) => {
+  try {
+    const period = req.query.period || "daily";
+
+    const partnerTypes = ["member", "church", "group"];
+    const result = {};
+
+    for (let type of partnerTypes) {
+      const data = await Giving.aggregate([
+        { $match: { deleted: false, [type]: { $exists: true }, amount: { $exists: true } } },
+        {
+          $group: {
+            _id: {
+              partnerId: `$${type}`,
+              period: {
+                $switch: {
+                  branches: [
+                    {
+                      case: { $eq: [period, "daily"] },
+                      then: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                    },
+                    {
+                      case: { $eq: [period, "weekly"] },
+                      then: { $isoWeek: "$createdAt" },
+                    },
+                    {
+                      case: { $eq: [period, "monthly"] },
+                      then: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+                    },
+                    {
+                      case: { $eq: [period, "quarterly"] },
+                      then: { $concat: [
+                        { $toString: { $year: "$createdAt" } },
+                        "-Q",
+                        { $toString: { $ceil: { $divide: [{ $add: [{ $month: "$createdAt" }, 0] }, 3] } } }
+                      ] },
+                    },
+                  ],
+                  default: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                },
+              },
+            },
+            totalAmount: { $sum: "$amount" },
+          },
+        },
+        { $sort: { "_id.period": 1 } },
+      ]);
+
+      result[type === "member" ? "individuals" : type === "church" ? "churches" : "groups"] = data.map(d => ({
+        partnerId: d._id.partnerId,
+        period: d._id.period,
+        amount: d.totalAmount,
+      }));
+    }
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("Error in getPartnersTrend:", err);
+    res.status(500).json({ message: "Server error fetching partners trend" });
+  }
+};
+
+// 3️⃣ Cumulative Partnership
+export const getCumulativePartnership = async (req, res) => {
+  try {
+    const partnerTypes = ["member", "church", "group"];
+    const result = [];
+
+    for (let type of partnerTypes) {
+      const agg = await Giving.aggregate([
+        { $match: { deleted: false, [type]: { $exists: true }, amount: { $exists: true } } },
+        { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
+      ]);
+
+      result.push({
+        type: type === "member" ? "Individuals" : type === "church" ? "Churches" : "Groups",
+        amount: agg[0]?.totalAmount || 0,
+      });
+    }
+
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("Error in getCumulativePartnership:", err);
+    res.status(500).json({ message: "Server error fetching cumulative partnership" });
   }
 };

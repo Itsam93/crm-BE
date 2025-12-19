@@ -8,6 +8,9 @@ import {
   getUpcomingBirthdays,
   getRecentGivings,
   getTopPartners,
+  getGivingsTrend,          // ✅ new
+  getPartnersTrend,         // ✅ new
+  getCumulativePartnership, // ✅ new
 } from "../controllers/adminController.js";
 
 import churchRoutes from "./churchRoutes.js";
@@ -29,6 +32,11 @@ router.get("/recent-givings", getRecentGivings);
 
 // Top Partners
 router.get("/top-partners", getTopPartners);
+
+// ===== Trend Analysis =====
+router.get("/givings-trend", getGivingsTrend);               // ?period=daily|weekly|monthly|quarterly
+router.get("/partners-trend", getPartnersTrend);             // ?period=daily|weekly|monthly|quarterly
+router.get("/cumulative-partnership", getCumulativePartnership); 
 
 // ===== Group Routes =====
 router.get("/groups", getGroups);
