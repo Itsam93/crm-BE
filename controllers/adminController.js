@@ -323,7 +323,7 @@ export const getGivingsTrend = async (req, res) => {
     const period = req.query.period || "daily";
 
     const givings = await Giving.aggregate([
-      { $match: { deleted: false, amount: { $exists: true } } },
+      { $match: { deleted: false, amount: { $gt: 0 } } },
       {
         $group: {
           _id: {
@@ -331,104 +331,163 @@ export const getGivingsTrend = async (req, res) => {
               branches: [
                 {
                   case: { $eq: [period, "daily"] },
-                  then: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                  then: {
+                    $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                  }
                 },
                 {
                   case: { $eq: [period, "weekly"] },
-                  then: { $isoWeek: "$createdAt" },
+                  then: {
+                    $dateToString: {
+                      format: "%Y-%m-%d",
+                      date: {
+                        $dateSubtract: {
+                          startDate: "$createdAt",
+                          unit: "day",
+                          amount: { $subtract: [{ $dayOfWeek: "$createdAt" }, 1] }
+                        }
+                      }
+                    }
+                  }
                 },
                 {
                   case: { $eq: [period, "monthly"] },
-                  then: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+                  then: {
+                    $dateToString: { format: "%Y-%m", date: "$createdAt" }
+                  }
                 },
                 {
                   case: { $eq: [period, "quarterly"] },
-                  then: { $concat: [
-                    { $toString: { $year: "$createdAt" } },
-                    "-Q",
-                    { $toString: { $ceil: { $divide: [{ $add: [{ $month: "$createdAt" }, 0] }, 3] } } }
-                  ] },
-                },
+                  then: {
+                    $concat: [
+                      { $toString: { $year: "$createdAt" } },
+                      "-Q",
+                      {
+                        $toString: {
+                          $ceil: { $divide: [{ $month: "$createdAt" }, 3] }
+                        }
+                      }
+                    ]
+                  }
+                }
               ],
-              default: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-            },
+              default: {
+                $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+              }
+            }
           },
           totalAmount: { $sum: "$amount" },
-          count: { $sum: 1 },
-        },
+          count: { $sum: 1 }
+        }
       },
-      { $sort: { "_id": 1 } },
+      { $sort: { "_id": 1 } }
     ]);
 
-    res.status(200).json(givings.map(g => ({ label: g._id, amount: g.totalAmount, count: g.count })));
+    res.json(
+      givings.map(g => ({
+        label: g._id,
+        amount: g.totalAmount,
+        count: g.count
+      }))
+    );
   } catch (err) {
-    console.error("Error in getGivingsTrend:", err);
-    res.status(500).json({ message: "Server error fetching givings trend" });
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch givings trend" });
   }
 };
+
 
 // 2️⃣ Partners Trend
 export const getPartnersTrend = async (req, res) => {
   try {
     const period = req.query.period || "daily";
 
-    const partnerTypes = ["member", "church", "group"];
-    const result = {};
-
-    for (let type of partnerTypes) {
-      const data = await Giving.aggregate([
-        { $match: { deleted: false, [type]: { $exists: true }, amount: { $exists: true } } },
-        {
-          $group: {
-            _id: {
-              partnerId: `$${type}`,
-              period: {
-                $switch: {
-                  branches: [
-                    {
-                      case: { $eq: [period, "daily"] },
-                      then: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                    },
-                    {
-                      case: { $eq: [period, "weekly"] },
-                      then: { $isoWeek: "$createdAt" },
-                    },
-                    {
-                      case: { $eq: [period, "monthly"] },
-                      then: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
-                    },
-                    {
-                      case: { $eq: [period, "quarterly"] },
-                      then: { $concat: [
+    const agg = await Giving.aggregate([
+      {
+        $match: {
+          deleted: false,
+          amount: { $gt: 0 },
+          $or: [
+            { member: { $ne: null } },
+            { church: { $ne: null } },
+            { group: { $ne: null } }
+          ]
+        }
+      },
+      {
+        $group: {
+          _id: {
+            period: {
+              $switch: {
+                branches: [
+                  {
+                    case: { $eq: [period, "daily"] },
+                    then: {
+                      $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                    }
+                  },
+                  {
+                    case: { $eq: [period, "weekly"] },
+                    then: {
+                      $concat: [
+                        { $toString: { $isoWeekYear: "$createdAt" } },
+                        "-W",
+                        { $toString: { $isoWeek: "$createdAt" } }
+                      ]
+                    }
+                  },
+                  {
+                    case: { $eq: [period, "monthly"] },
+                    then: {
+                      $dateToString: { format: "%Y-%m", date: "$createdAt" }
+                    }
+                  },
+                  {
+                    case: { $eq: [period, "quarterly"] },
+                    then: {
+                      $concat: [
                         { $toString: { $year: "$createdAt" } },
                         "-Q",
-                        { $toString: { $ceil: { $divide: [{ $add: [{ $month: "$createdAt" }, 0] }, 3] } } }
-                      ] },
-                    },
-                  ],
-                  default: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                },
-              },
-            },
-            totalAmount: { $sum: "$amount" },
+                        {
+                          $toString: {
+                            $ceil: { $divide: [{ $month: "$createdAt" }, 3] }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                default: {
+                  $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                }
+              }
+            }
           },
-        },
-        { $sort: { "_id.period": 1 } },
-      ]);
+          partners: {
+            $addToSet: {
+              $ifNull: ["$member", { $ifNull: ["$church", "$group"] }]
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          label: "$_id.period",
+          partnersCount: { $size: "$partners" }
+        }
+      },
+      { $sort: { label: 1 } }
+    ]);
 
-      result[type === "member" ? "individuals" : type === "church" ? "churches" : "groups"] = data.map(d => ({
-        partnerId: d._id.partnerId,
-        period: d._id.period,
-        amount: d.totalAmount,
-      }));
-    }
-
-    res.status(200).json(result);
+    res.status(200).json(agg);
   } catch (err) {
-    console.error("Error in getPartnersTrend:", err);
-    res.status(500).json({ message: "Server error fetching partners trend" });
+    console.error("Partners trend error:", err);
+    res.status(500).json({ message: "Failed to fetch partners trend" });
   }
 };
+
+
 
 // 3️⃣ Cumulative Partnership
 export const getCumulativePartnership = async (req, res) => {
