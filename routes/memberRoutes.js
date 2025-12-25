@@ -63,7 +63,7 @@ router.post("/:id/review-update", ...adminOnly, reviewUpdateRequest);
 // ============================================================
 // 👤 MEMBER PROFILE (admin only)
 // ============================================================
-router.get("/:id/profile", ...adminOnly, getMemberProfile);
+router.get("/:id/profile", getMemberProfile);
 
 // Upcoming wedding anniversaries (admin only)
 router.get("/upcoming-anniversaries", ...adminOnly, getUpcomingAnniversaries);
