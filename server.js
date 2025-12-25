@@ -88,12 +88,12 @@ app.use("/api/partners", partnershipRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/churches", churchRoutes);
-// app.use("/api/members", memberRoutes);
+app.use("/api/members", memberRoutes);
 app.use("/api/givings", givingRoutes);
 app.use("/api/hod", hodRoutes);
 app.use("/api/marriages", marriageRoutes);
 app.use("/api/admin/marriages", marriageRoutes);
-app.use("/api/admin/members", memberRoutes);
+// app.use("/api/admin/members", memberRoutes);
 
 
 // ============================================================
