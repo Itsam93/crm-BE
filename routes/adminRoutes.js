@@ -6,11 +6,12 @@ import {
   deleteGroup,
   getAdminSummary,
   getUpcomingBirthdays,
+  getUpcomingAnniversaries,
   getRecentGivings,
   getTopPartners,
-  getGivingsTrend,          // ✅ new
-  getPartnersTrend,         // ✅ new
-  getCumulativePartnership, // ✅ new
+  getGivingsTrend,          
+  getPartnersTrend,         
+  getCumulativePartnership, 
 } from "../controllers/adminController.js";
 
 import churchRoutes from "./churchRoutes.js";
@@ -27,6 +28,9 @@ router.get("/summary", getAdminSummary);
 // Upcoming Birthdays
 router.get("/upcoming-birthdays", getUpcomingBirthdays);
 
+// Upcoming Wedding Anniversaries
+router.get("/upcoming-anniversaries", getUpcomingAnniversaries);
+
 // Recent Givings
 router.get("/recent-givings", getRecentGivings);
 
@@ -34,8 +38,8 @@ router.get("/recent-givings", getRecentGivings);
 router.get("/top-partners", getTopPartners);
 
 // ===== Trend Analysis =====
-router.get("/givings-trend", getGivingsTrend);               // ?period=daily|weekly|monthly|quarterly
-router.get("/partners-trend", getPartnersTrend);             // ?period=daily|weekly|monthly|quarterly
+router.get("/givings-trend", getGivingsTrend);               
+router.get("/partners-trend", getPartnersTrend);             
 router.get("/cumulative-partnership", getCumulativePartnership); 
 
 // ===== Group Routes =====

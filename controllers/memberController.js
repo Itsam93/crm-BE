@@ -3,6 +3,9 @@ import Group from "../models/Group.js";
 import Church from "../models/Church.js";
 import fs from "fs";
 import XLSX from "xlsx";
+import Giving from "../models/Giving.js";
+import Marriage from "../models/Marriage.js";
+import mongoose from "mongoose";
 
 /* ===============================
    CREATE NEW MEMBER
@@ -46,10 +49,12 @@ export const getMembers = async (req, res) => {
     const group = req.query.group || "";
     const church = req.query.church || "";
 
-    const filter = {}; // <-- removed deleted: false since hard delete is used
+    const filter = {}; 
     if (search) filter.name = { $regex: search, $options: "i" };
     if (group) filter.group = group;
     if (church) filter.church = church;
+    if (req.query.gender) filter.gender = req.query.gender;
+
 
     const total = await Member.countDocuments(filter);
     const members = await Member.find(filter)
@@ -64,6 +69,27 @@ export const getMembers = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+export const searchMembers = async (req, res) => {
+  try {
+    const { q } = req.query;
+
+    if (!q || q.length < 2) {
+      return res.json([]);
+    }
+
+    const members = await Member.find({
+      name: { $regex: q, $options: "i" }
+    })
+      .select("_id name")
+      .limit(10);
+
+    res.json(members);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 
 /* ===============================
    UPDATE MEMBER (Admin/HOD Direct Update)
@@ -96,7 +122,7 @@ export const updateMember = async (req, res) => {
 ================================= */
 export const submitUpdateRequest = async (req, res) => {
   try {
-    const { id } = req.params; // Member ID
+    const { id } = req.params; 
     const newDetails = req.body;
 
     const member = await Member.findById(id);
@@ -118,14 +144,14 @@ export const submitUpdateRequest = async (req, res) => {
 export const reviewUpdateRequest = async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, notes } = req.body; // action: 'approve' | 'reject'
+    const { action, notes } = req.body; 
 
     const member = await Member.findById(id);
     if (!member) return res.status(404).json({ message: "Member not found" });
 
     if (action === "approve") {
       if (member.pendingUpdate) {
-        Object.assign(member, member.pendingUpdate); // apply changes
+        Object.assign(member, member.pendingUpdate); 
         member.pendingUpdate = null;
         member.updateStatus = "approved";
         member.updateNotes = notes || "Approved successfully";
@@ -243,5 +269,174 @@ export const bulkUploadMembers = async (req, res) => {
     console.error("Bulk upload error:", err);
     if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     return res.status(500).json({ message: "Internal server error", error: err.message });
+  }
+};
+
+
+/* ===============================
+   GET MEMBER PROFILE
+================================= */
+export const getMemberProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid member ID" });
+    }
+
+    // ===== Member Core Details =====
+    const member = await Member.findById(id)
+      .populate("group", "group_name")
+      .populate("church", "name")
+      .populate("hod", "name")
+      .lean();
+
+    if (!member) {
+      return res.status(404).json({ message: "Member not found" });
+    }
+
+    // ===== Marriage Info =====
+    const marriage = await Marriage.findOne({
+      status: "active",
+      $or: [{ husband: id }, { wife: id }],
+    })
+      .populate("husband", "name phone")
+      .populate("wife", "name phone")
+      .lean();
+
+    let maritalStatus = "Single";
+    let spouse = null;
+    let weddingDate = null;
+    let yearsMarried = null;
+
+    if (marriage) {
+      maritalStatus = "Married";
+      weddingDate = marriage.weddingDate;
+
+      spouse =
+        marriage.husband._id.toString() === id
+          ? marriage.wife
+          : marriage.husband;
+
+      const today = new Date();
+      yearsMarried =
+        today.getFullYear() - new Date(weddingDate).getFullYear();
+    }
+
+   // Normalize arm function
+const normalizeArm = (value) => {
+  if (!value) return "Rhapsody";
+
+  const key = value.toLowerCase().trim().replace(/\s+/g, "_");
+
+  const map = {
+    rhapsody: "Rhapsody",
+    healing_school: "Healing School",
+    ministry_programs: "Ministry Programs",
+    innercity_missions: "Innercity Missions",
+    loveworld_bibles: "Loveworld Bibles",
+    lwpm: "LWPM",
+  };
+
+  return map[key] || "Rhapsody";
+};
+
+// ===== Giving Summary =====
+const givingSummaryRaw = await Giving.aggregate([
+  {
+    $match: {
+      member: new mongoose.Types.ObjectId(id),
+      deleted: false,
+    },
+  },
+  {
+    $group: {
+      _id: "$arm",
+      totalAmount: { $sum: "$amount" },
+    },
+  },
+  {
+    $project: {
+      arm: "$_id",
+      totalAmount: 1,
+      _id: 0,
+    },
+  },
+]);
+
+// Normalize arms from the DB and ensure all arms are included
+const allArms = [
+  "Rhapsody",
+  "Healing School",
+  "Ministry Programs",
+  "Innercity Missions",
+  "Loveworld Bibles",
+  "LWPM",
+];
+
+const givingSummary = allArms.map((armName) => {
+  const found = givingSummaryRaw.find((g) => normalizeArm(g.arm) === armName);
+  return { arm: armName, totalAmount: found ? found.totalAmount : 0 };
+});
+
+const grandTotal = givingSummary.reduce((sum, g) => sum + g.totalAmount, 0);
+
+
+    // ===== Celebrations =====
+    const today = new Date();
+
+    const birthdayToday =
+      member.birthday &&
+      member.birthday.getDate() === today.getDate() &&
+      member.birthday.getMonth() === today.getMonth();
+
+    const anniversaryToday =
+      weddingDate &&
+      new Date(weddingDate).getDate() === today.getDate() &&
+      new Date(weddingDate).getMonth() === today.getMonth();
+
+    // ===== Respond =====
+    res.status(200).json({
+      member,
+      maritalStatus,
+      spouse,
+      weddingDate,
+      yearsMarried,
+      givingSummary,
+      grandTotal,
+      celebrations: {
+        birthdayToday,
+        anniversaryToday,
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching member profile:", err);
+    res.status(500).json({ message: "Failed to fetch member profile" });
+  }
+};
+
+
+// GET /admin/members/upcoming-anniversaries
+export const getUpcomingAnniversaries = async (req, res) => {
+  try {
+    const today = new Date();
+    const next30 = new Date();
+    next30.setDate(today.getDate() + 30);
+
+    const marriages = await Marriage.find({ status: "active" })
+      .populate("husband", "name group church")
+      .populate("wife", "name group church")
+      .lean();
+
+    const upcoming = marriages.filter((m) => {
+      if (!m.weddingDate) return false;
+      const anniv = new Date(today.getFullYear(), m.weddingDate.getMonth(), m.weddingDate.getDate());
+      return anniv >= today && anniv <= next30;
+    });
+
+    res.status(200).json({ upcoming });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to fetch upcoming anniversaries" });
   }
 };

@@ -3,6 +3,7 @@ import Church from "../models/Church.js";
 import Member from "../models/Member.js";
 import Giving from "../models/Giving.js";
 import User from "../models/User.js";
+import Marriage from "../models/Marriage.js";
 
 // ===== Admin Dashboard =====
 export const getAdminSummary = async (req, res) => {
@@ -166,10 +167,10 @@ export const getUpcomingBirthdays = async (req, res) => {
       .populate("church", "name");
 
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0); 
 
-    const tenDaysFromNow = new Date(today);
-    tenDaysFromNow.setDate(today.getDate() + 10);
+    const sevenDaysFromNow = new Date(today);
+    sevenDaysFromNow.setDate(today.getDate() + 7);
 
     const upcoming = members
       .map((m) => {
@@ -177,23 +178,20 @@ export const getUpcomingBirthdays = async (req, res) => {
 
         const birthDate = new Date(m.birthday);
 
-        // Normalize birthday to this year
-        let nextBirthday = new Date(
-          today.getFullYear(),
-          birthDate.getMonth(),
-          birthDate.getDate()
-        );
+        // Normalize to this year
+        let nextBirthday = new Date(today.getFullYear(), birthDate.getMonth(), birthDate.getDate());
 
-        // If birthday already passed this year, move to next year
+        // Move to next year if birthday already passed this year
         if (nextBirthday < today) {
           nextBirthday.setFullYear(today.getFullYear() + 1);
         }
 
-        // Outside 10-day window
-        if (nextBirthday > tenDaysFromNow) return null;
-
+        // Calculate days remaining
         const diffMs = nextBirthday.getTime() - today.getTime();
         const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+        // Only include birthdays within next 7 days
+        if (daysRemaining < 0 || daysRemaining > 7) return null;
 
         return {
           id: m._id.toString(),
@@ -206,8 +204,7 @@ export const getUpcomingBirthdays = async (req, res) => {
         };
       })
       .filter(Boolean)
-      .sort((a, b) => a.daysRemaining - b.daysRemaining)
-      .slice(0, 10); 
+      .sort((a, b) => a.daysRemaining - b.daysRemaining); // closest birthday first
 
     res.json(upcoming);
   } catch (err) {
@@ -511,5 +508,79 @@ export const getCumulativePartnership = async (req, res) => {
   } catch (err) {
     console.error("Error in getCumulativePartnership:", err);
     res.status(500).json({ message: "Server error fetching cumulative partnership" });
+  }
+};
+
+
+// Get Marriage Anniversary
+
+export const getUpcomingAnniversaries = async (req, res) => {
+  try {
+    const today = new Date();
+    const next30Days = new Date();
+    next30Days.setDate(today.getDate() + 30);
+
+    const anniversaries = await Marriage.aggregate([
+      {
+        $match: {
+          status: "active",
+          $expr: {
+            $and: [
+              {
+                $gte: [
+                  {
+                    $dateFromParts: {
+                      year: today.getFullYear(),
+                      month: { $month: "$weddingDate" },
+                      day: { $dayOfMonth: "$weddingDate" }
+                    }
+                  },
+                  today
+                ]
+              },
+              {
+                $lte: [
+                  {
+                    $dateFromParts: {
+                      year: today.getFullYear(),
+                      month: { $month: "$weddingDate" },
+                      day: { $dayOfMonth: "$weddingDate" }
+                    }
+                  },
+                  next30Days
+                ]
+              }
+            ]
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: "members",
+          localField: "husband",
+          foreignField: "_id",
+          as: "husband"
+        }
+      },
+      {
+        $lookup: {
+          from: "members",
+          localField: "wife",
+          foreignField: "_id",
+          as: "wife"
+        }
+      },
+      {
+        $project: {
+          weddingDate: 1,
+          husband: { $arrayElemAt: ["$husband", 0] },
+          wife: { $arrayElemAt: ["$wife", 0] }
+        }
+      }
+    ]);
+
+    res.status(200).json(anniversaries);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch anniversaries" });
   }
 };
