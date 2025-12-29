@@ -93,7 +93,7 @@ app.use("/api/givings", givingRoutes);
 app.use("/api/hod", hodRoutes);
 app.use("/api/marriages", marriageRoutes);
 app.use("/api/admin/marriages", marriageRoutes);
-// app.use("/api/admin/members", memberRoutes);
+app.use("/api/admin/members", memberRoutes);
 
 
 // ============================================================

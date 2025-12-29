@@ -28,14 +28,17 @@ const adminOnly = [requireAdmin];
 const upload = multer({ dest: "uploads/" });
 
 // ============================================================
-// 🔍 SEARCH (must come BEFORE :id routes)
+// 🔍 SEARCH 
 // ============================================================
-router.get("/search", searchMembers);
+router.get("/search", (req, res, next) => {
+   next();
+}, searchMembers);
+
 
 // ============================================================
 // 📋 MEMBERS LIST (admin only)
 // ============================================================
-router.get("/", ...adminOnly, getMembers);
+router.get("/", getMembers);
 
 // ============================================================
 // ➕➖ CRUD (admin only)
@@ -55,7 +58,7 @@ router.post(
 );
 
 // ============================================================
-// 📝 MEMBER UPDATE REQUESTS
+// MEMBER UPDATE REQUESTS
 // ============================================================
 router.post("/:id/request-update", submitUpdateRequest);
 router.post("/:id/review-update", ...adminOnly, reviewUpdateRequest);

@@ -71,24 +71,42 @@ export const getMembers = async (req, res) => {
 };
 
 export const searchMembers = async (req, res) => {
-  try {
-    const { q } = req.query;
 
-    if (!q || q.length < 2) {
-      return res.json([]);
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const search = req.query.search?.trim();
+
+    const filter = {
+      deleted: false,
+    };
+
+    // ✅ Correct search — matches your schema
+    if (search) {
+      filter.name = { $regex: search, $options: "i" };
     }
 
-    const members = await Member.find({
-      name: { $regex: q, $options: "i" }
-    })
-      .select("_id name")
-      .limit(10);
+    const total = await Member.countDocuments(filter);
 
-    res.json(members);
+    const members = await Member.find(filter)
+      .populate("group", "group_name")
+      .populate("church", "name")
+      .populate("hod", "name")
+      .limit(limit)
+      .skip((page - 1) * limit);
+
+    res.status(200).json({
+      members,
+      total,
+      page,
+      limit,
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("❌ searchMembers ERROR:", err);
+    res.status(500).json({ message: "Search failed" });
   }
 };
+
 
 
 /* ===============================
