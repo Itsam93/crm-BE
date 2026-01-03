@@ -3,15 +3,30 @@ import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
+    name: {
+      type: String,
+      required: true,
+      trim: true
+    },
 
-    password: { type: String, required: true },
+    password: {
+      type: String,
+      required: true,
+      select: false   
+    },
 
     role: {
       type: String,
-      enum: ["admin", "healing_hod", "rhapsody_hod", "ministry_hod"],
+      enum: [
+        "admin",
+        "healing_hod",
+        "rhapsody_hod",
+        "ministry_hod",
+        "bibles_hod",
+        "innercity_hod",
+        "lwpm_hod"
+      ],
       required: true,
-      unique: true,          
       index: true
     },
 
@@ -22,6 +37,7 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
 
 // Hash password
 userSchema.pre("save", async function (next) {

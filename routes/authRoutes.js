@@ -33,7 +33,7 @@ router.get(
 router.get(
   "/hod/dashboard",
   requireAuth,
-  requireRole(["healing_hod", "rhapsody_hod", "ministry_hod"]),
+  requireRole(["healing_hod", "rhapsody_hod", "ministry_hod", "bibles_hod", "innercity_hod", "lwpm_hod"]),
   (req, res) => {
     res.json({ message: "Welcome HOD Dashboard" });
   }

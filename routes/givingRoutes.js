@@ -15,7 +15,7 @@ const router = express.Router();
 const upload = multer();
 
 // Define HOD roles
-const HOD_ROLES = ["healing_hod", "rhapsody_hod", "ministry_hod"];
+const HOD_ROLES = ["healing_hod", "rhapsody_hod", "ministry_hod", "bibles_hod", "innercity_hod", "lwpm_hod"];
 
 // Public givings routes for HODs and Admin
 router.get("/", requireAuth, requireRole([...HOD_ROLES, "admin"]), getGivings);

@@ -34,7 +34,7 @@ export const loginUser = async (req, res) => {
     // ============================
     // HOD LOGIN (DATABASE-based)
     // ============================
-    const allowedHODRoles = ["healing_hod", "rhapsody_hod", "ministry_hod"];
+    const allowedHODRoles = ["healing_hod", "rhapsody_hod", "ministry_hod", "bibles_hod", "innercity_hod", "lwpm_hod"];
     if (!allowedHODRoles.includes(role)) {
       return res.status(404).json({ message: "Role not found" });
     }

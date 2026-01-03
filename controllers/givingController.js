@@ -29,12 +29,12 @@ const normalizeArm = (value) => {
 
 // Map HOD roles to arms
 const hodArmMap = {
-  healing_hod: "healing School",
+  healing_hod: "healing_school",
   rhapsody_hod: "rhapsody",
   ministry_hod: "ministry_programs",
   bibles_hod: "loveworld_bibles",
   innercity_hod: "innercity_missions",
-  lwpm_hod: "LWPM"
+  lwpm_hod: "lwpm"
 };
 
 
@@ -389,30 +389,21 @@ export const bulkUploadGivings = async (req, res) => {
 };
 
 
-// Internal helper: runs the aggregation pipeline and returns data
-const getReportsInternal = async ({ user, type, from, to }) => {
+// -----------------------
+// Internal helper
+// -----------------------
+export const getReportsInternal = async ({ user, type, from, to }) => {
   const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
   type = typeMap[type?.toLowerCase()];
   if (!type) throw new Error("Invalid report type");
 
-  // Normalize HOD arm
+  // Determine HOD arm
   let partnershipArm;
-  if (user?.role?.includes("_hod")) {
-    const roleMap = {
-      healing_hod: "healing_school",
-      rhapsody_hod: "rhapsody",
-      ministry_hod: "ministry_programs",
-      bibles_hod: "loveworld_bibles",
-      innercity_hod: "innercity_missions",
-      lwpm_hod: "LWPM_hod",
-    };
-    partnershipArm = roleMap[user.role];
+  if (user?.role?.endsWith("_hod")) {
+    partnershipArm = hodArmMap[user.role]?.toLowerCase();
   }
 
-  // Base match for givings
   const match = { deleted: false };
-
-  // Add date filters
   if (from || to) {
     match.createdAt = {};
     if (from) match.createdAt.$gte = new Date(from);
@@ -420,7 +411,7 @@ const getReportsInternal = async ({ user, type, from, to }) => {
   }
 
   const pipeline = [
-    // Normalize arm field
+    // Normalize DB arm field
     {
       $addFields: {
         normalizedArm: {
@@ -432,21 +423,20 @@ const getReportsInternal = async ({ user, type, from, to }) => {
         },
       },
     },
-    // Match HOD arm + deleted + date
-    { $match: { ...match, ...(partnershipArm ? { normalizedArm: partnershipArm } : {}) } },
-  ];
-
-  // Lookup member, church, group
-  pipeline.push(
+    {
+      $match: {
+        ...match,
+        ...(partnershipArm ? { normalizedArm: partnershipArm } : {}),
+      },
+    },
     { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
     { $unwind: "$member" },
     { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
     { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
     { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
-    { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } }
-  );
+    { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
+  ];
 
-  // Group by report type
   let groupStage = {};
   switch (type) {
     case "member":
@@ -482,34 +472,28 @@ const getReportsInternal = async ({ user, type, from, to }) => {
 
   pipeline.push({ $group: groupStage }, { $sort: { totalAmount: -1 } });
 
-  const data = await Giving.aggregate(pipeline);
-  return data;
+  return await Giving.aggregate(pipeline);
 };
 
-
+// -----------------------
 // Unified endpoint
+// -----------------------
 export const getReports = async (req, res) => {
   try {
     const { type, from, to } = req.query;
 
-    // Pass date filters to internal function
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+
+    // Determine HOD arm
+    let partnershipArm;
+    if (req.user.role?.endsWith("_hod")) {
+      partnershipArm = hodArmMap[req.user.role]?.toLowerCase();
+    }
+
     const data = await getReportsInternal({ user: req.user, type, from, to });
 
-    // Optional: send HOD arm total if HOD
-    let armTotal;
-    if (req.user.role.includes("_hod")) {
-      // Normalize HOD arm like we did in getReportsInternal
-      const roleMap = {
-        healing_hod: "healing_school",
-        rhapsody_hod: "rhapsody",
-        ministry_hod: "ministry_programs",
-        bibles_hod: "loveworld_bibles",
-        innercity_hod: "innercity_missions",
-        lwpm_hos: "LWPM_hod",
-      };
-      const partnershipArm = roleMap[req.user.role];
-
-      // Normalize arm field in DB and match + date filters
+    let armTotal = 0;
+    if (partnershipArm) {
       const match = { deleted: false, normalizedArm: partnershipArm };
       if (from || to) {
         match.createdAt = {};
@@ -518,17 +502,7 @@ export const getReports = async (req, res) => {
       }
 
       const armTotalAgg = await Giving.aggregate([
-        {
-          $addFields: {
-            normalizedArm: {
-              $replaceAll: {
-                input: { $toLower: "$arm" },
-                find: " ",
-                replacement: "_",
-              },
-            },
-          },
-        },
+        { $addFields: { normalizedArm: { $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" } } } },
         { $match: match },
         { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
       ]);
@@ -542,7 +516,6 @@ export const getReports = async (req, res) => {
     return res.status(500).json({ message: err.message || "Server error" });
   }
 };
-
 
 
 
