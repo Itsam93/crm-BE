@@ -7,6 +7,8 @@ import Giving from "../models/Giving.js";
 import Member from "../models/Member.js";
 import Group from "../models/Group.js";
 import Church from "../models/Church.js";
+import { parse } from "json2csv";
+
 
 const { Types } = mongoose;
 
@@ -388,91 +390,131 @@ export const bulkUploadGivings = async (req, res) => {
   }
 };
 
-
 // -----------------------
 // Internal helper
 // -----------------------
 export const getReportsInternal = async ({ user, type, from, to }) => {
-  const typeMap = { individual: "member", member: "member", group: "group", church: "church" };
+  const typeMap = {
+    individual: "member",
+    member: "member",
+    group: "group",
+    church: "church",
+  };
+
   type = typeMap[type?.toLowerCase()];
   if (!type) throw new Error("Invalid report type");
 
-  // Determine HOD arm
-  let partnershipArm;
+  // Restrict HODs to their partnership arm
+  let partnershipArm = null;
   if (user?.role?.endsWith("_hod")) {
     partnershipArm = hodArmMap[user.role]?.toLowerCase();
   }
 
-  const match = { deleted: false };
+  // Normalize date filters
+  const baseMatch = { deleted: false };
   if (from || to) {
-    match.createdAt = {};
-    if (from) match.createdAt.$gte = new Date(from);
-    if (to) match.createdAt.$lte = new Date(to);
+    baseMatch.date = {};
+    if (from) baseMatch.date.$gte = new Date(new Date(from).setHours(0, 0, 0, 0));
+    if (to) baseMatch.date.$lte = new Date(new Date(to).setHours(23, 59, 59, 999));
   }
 
   const pipeline = [
-    // Normalize DB arm field
+    // Normalize arm for consistent HOD filtering
     {
       $addFields: {
         normalizedArm: {
-          $replaceAll: {
-            input: { $toLower: "$arm" },
-            find: " ",
-            replacement: "_",
-          },
+          $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" },
         },
       },
     },
     {
       $match: {
-        ...match,
+        ...baseMatch,
         ...(partnershipArm ? { normalizedArm: partnershipArm } : {}),
       },
     },
+
+    // Lookups
     { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
     { $unwind: "$member" },
+
     { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
     { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
+
     { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
     { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
+
+    // Aggregations
+    {
+      $facet: {
+        rows: [
+          {
+            $group: (() => {
+              switch (type) {
+                case "member":
+                  return {
+                    _id: "$member._id",
+                    name: { $first: "$member.name" },
+                    phone: { $first: "$member.phone" },
+                    church: { $first: "$member.church" },
+                    group: { $first: "$member.group" },
+                    totalAmount: { $sum: "$amount" },
+                    arms: { $push: { arm: "$arm", amount: "$amount" } },
+                  };
+                case "church":
+                  return {
+                    _id: "$member.church._id",
+                    name: { $first: "$member.church.name" },
+                    group: { $first: "$member.group" },
+                    totalAmount: { $sum: "$amount" },
+                    arms: { $push: { arm: "$arm", amount: "$amount" } },
+                  };
+                case "group":
+                  return {
+                    _id: "$member.group._id",
+                    name: { $first: "$member.group.name" },
+                    totalAmount: { $sum: "$amount" },
+                    arms: { $push: { arm: "$arm", amount: "$amount" } },
+                  };
+              }
+            })(),
+          },
+          { $sort: { totalAmount: -1 } },
+        ],
+
+        // Per-arm totals (Admin/HOD)
+        armTotals: [
+          {
+            $group: {
+              _id: "$normalizedArm",
+              totalAmount: { $sum: "$amount" },
+            },
+          },
+        ],
+
+        // Grand total
+        grandTotal: [
+          {
+            $group: {
+              _id: null,
+              totalAmount: { $sum: "$amount" },
+            },
+          },
+        ],
+      },
+    },
   ];
 
-  let groupStage = {};
-  switch (type) {
-    case "member":
-      groupStage = {
-        _id: "$member._id",
-        name: { $first: "$member.name" },
-        phone: { $first: "$member.phone" },
-        totalAmount: { $sum: "$amount" },
-        arms: { $push: { arm: "$arm", amount: "$amount" } },
-        church: { $first: "$member.church" },
-        group: { $first: "$member.group" },
-      };
-      break;
-    case "church":
-      groupStage = {
-        _id: "$member.church._id",
-        name: { $first: "$member.church.name" },
-        totalAmount: { $sum: "$amount" },
-        arms: { $push: { arm: "$arm", amount: "$amount" } },
-        group: { $first: "$member.group" },
-      };
-      break;
-    case "group":
-      groupStage = {
-        _id: "$member.group._id",
-        name: { $first: "$member.group.name" },
-        totalAmount: { $sum: "$amount" },
-        arms: { $push: { arm: "$arm", amount: "$amount" } },
-        group: { $first: "$member.group" },
-      };
-      break;
-  }
+  const [result] = await Giving.aggregate(pipeline);
 
-  pipeline.push({ $group: groupStage }, { $sort: { totalAmount: -1 } });
-
-  return await Giving.aggregate(pipeline);
+  return {
+    rows: result.rows,
+    armTotals: result.armTotals.reduce((acc, cur) => {
+      acc[cur._id] = cur.totalAmount;
+      return acc;
+    }, {}),
+    grandTotal: result.grandTotal[0]?.totalAmount || 0,
+  };
 };
 
 // -----------------------
@@ -484,11 +526,9 @@ export const getReports = async (req, res) => {
 
     if (!req.user) return res.status(401).json({ message: "Unauthorized" });
 
-    // Determine HOD arm
-    let partnershipArm;
-    if (req.user.role?.endsWith("_hod")) {
-      partnershipArm = hodArmMap[req.user.role]?.toLowerCase();
-    }
+    const partnershipArm = req.user.role?.endsWith("_hod")
+      ? hodArmMap[req.user.role]?.toLowerCase()
+      : null;
 
     const data = await getReportsInternal({ user: req.user, type, from, to });
 
@@ -496,9 +536,9 @@ export const getReports = async (req, res) => {
     if (partnershipArm) {
       const match = { deleted: false, normalizedArm: partnershipArm };
       if (from || to) {
-        match.createdAt = {};
-        if (from) match.createdAt.$gte = new Date(from);
-        if (to) match.createdAt.$lte = new Date(to);
+        match.date = {};
+        if (from) match.date.$gte = new Date(new Date(from).setHours(0, 0, 0, 0));
+        if (to) match.date.$lte = new Date(new Date(to).setHours(23, 59, 59, 999));
       }
 
       const armTotalAgg = await Giving.aggregate([
@@ -519,28 +559,117 @@ export const getReports = async (req, res) => {
 
 
 
-// Download endpoint: returns CSV
 export const downloadReportsCSV = async (req, res) => {
   try {
-    const { type } = req.query;
-    const data = await getReportsInternal({ user: req.user, type });
+    const { type = "member", from, to } = req.query;
 
-    // Convert Mongo aggregation result to CSV
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
+
+    // Determine HOD arm if user is a HOD
+    const partnershipArm = req.user.role?.endsWith("_hod")
+      ? hodArmMap[req.user.role]?.toLowerCase()
+      : null;
+
+    // Build base match for date filtering
+    const match = { deleted: false };
+    if (from || to) {
+      match.date = {};
+      if (from) match.date.$gte = new Date(new Date(from).setHours(0, 0, 0, 0));
+      if (to) match.date.$lte = new Date(new Date(to).setHours(23, 59, 59, 999));
+    }
+
+    if (partnershipArm) {
+      match.normalizedArm = partnershipArm;
+    }
+
+    // Normalize type
+    const typeMap = {
+      individual: "member",
+      member: "member",
+      group: "group",
+      church: "church",
+    };
+    const reportType = typeMap[type.toLowerCase()];
+    if (!reportType) return res.status(400).json({ message: "Invalid report type" });
+
+    // Aggregation pipeline
+    const pipeline = [
+      // Normalize arm
+      {
+        $addFields: {
+          normalizedArm: { $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" } },
+        },
+      },
+      { $match: match },
+      { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
+      { $unwind: "$member" },
+      { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
+      { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
+      { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
+      {
+        $group: (() => {
+          switch (reportType) {
+            case "member":
+              return {
+                _id: "$member._id",
+                name: { $first: "$member.name" },
+                phone: { $first: "$member.phone" },
+                church: { $first: "$member.church.name" },
+                group: { $first: "$member.group.name" },
+                totalAmount: { $sum: "$amount" },
+                arms: { $push: { arm: "$arm", amount: "$amount" } },
+              };
+            case "group":
+              return {
+                _id: "$member.group._id",
+                name: { $first: "$member.group.name" },
+                totalAmount: { $sum: "$amount" },
+                arms: { $push: { arm: "$arm", amount: "$amount" } },
+              };
+            case "church":
+              return {
+                _id: "$member.church._id",
+                name: { $first: "$member.church.name" },
+                group: { $first: "$member.group.name" },
+                totalAmount: { $sum: "$amount" },
+                arms: { $push: { arm: "$arm", amount: "$amount" } },
+              };
+          }
+        })(),
+      },
+      { $sort: { totalAmount: -1 } },
+    ];
+
+    const rows = await Giving.aggregate(pipeline);
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ message: "No records found for the selected filters" });
+    }
+
+    // Convert aggregation result to CSV
     const csv = parse(
-      data.map((row) => {
-        return {
+      rows.map((row) => {
+        const result = {
           id: row._id,
           name: row.name || "TOTAL",
           totalAmount: row.totalAmount,
-          church: row.church?.name || "",
-          group: row.group?.name || "",
           arms: row.arms ? row.arms.map((a) => `${a.arm}:${a.amount}`).join("; ") : "",
         };
+        if (reportType === "member") {
+          result.phone = row.phone || "";
+          result.church = row.church || "";
+          result.group = row.group || "";
+        }
+        if (reportType === "church") {
+          result.group = row.group || "";
+        }
+        return result;
       })
     );
 
     res.header("Content-Type", "text/csv");
-    res.attachment(`report-${type}-${Date.now()}.csv`);
+    res.attachment(`report-${reportType}-${Date.now()}.csv`);
     return res.send(csv);
   } catch (err) {
     console.error("downloadReportsCSV error:", err);
