@@ -59,9 +59,15 @@ export const createGroup = async (req, res) => {
     }
 
     group_name = group_name.trim();
-    if (pastor) pastor = pastor.trim();
 
-    // Case-insensitive duplicate check
+    // Validate pastor if provided
+    if (pastor) {
+      const memberExists = await Member.findById(pastor);
+      if (!memberExists) {
+        return res.status(400).json({ message: "Invalid pastor selected" });
+      }
+    }
+
     const existing = await Group.findOne({
       group_name: { $regex: `^${escapeRegex(group_name)}$`, $options: "i" },
     });
@@ -72,18 +78,20 @@ export const createGroup = async (req, res) => {
         .json({ message: "Group with this name already exists" });
     }
 
-    // Create new group
     const newGroup = new Group({
       group_name,
-      pastor: pastor || "Not assigned",
+      pastor: pastor || null, 
       isActive: true,
     });
 
     await newGroup.save();
 
-    return res
-      .status(201)
-      .json({ message: "Group created successfully", group: newGroup });
+    const populatedGroup = await newGroup.populate("pastor", "name full_name");
+
+    return res.status(201).json({
+      message: "Group created successfully",
+      group: populatedGroup,
+    });
   } catch (err) {
     console.error("Error creating group:", err);
     res.status(500).json({ message: "Server error while creating group" });
@@ -101,7 +109,6 @@ export const updateGroup = async (req, res) => {
     }
 
     const trimmedName = group_name.trim();
-    const trimmedPastor = pastor?.trim() || "Not assigned";
 
     const existing = await Group.findOne({
       _id: { $ne: id },
@@ -114,27 +121,46 @@ export const updateGroup = async (req, res) => {
         .json({ message: "Another group with this name already exists" });
     }
 
+    // Validate pastor if provided
+    if (pastor) {
+      const memberExists = await Member.findById(pastor);
+      if (!memberExists) {
+        return res.status(400).json({ message: "Invalid pastor selected" });
+      }
+    }
+
     const updatedGroup = await Group.findByIdAndUpdate(
       id,
-      { group_name: trimmedName, pastor: trimmedPastor },
+      {
+        group_name: trimmedName,
+        pastor: pastor || null, 
+      },
       { new: true }
-    );
+    ).populate("pastor", "name full_name"); 
 
     if (!updatedGroup) {
       return res.status(404).json({ message: "Group not found" });
     }
 
-    res.json({ message: "Group updated successfully", group: updatedGroup });
+    res.json({
+      message: "Group updated successfully",
+      group: updatedGroup,
+    });
   } catch (err) {
     console.error("Error updating group:", err);
     res.status(500).json({ message: "Server error while updating group" });
   }
 };
 
+
 // 🟣 Get all groups
 export const getGroups = async (req, res) => {
   try {
-    const groups = await Group.find().sort({ group_name: 1 });
+  console.log("🔥 GET /groups HIT");
+    const groups = await Group.find()
+      .populate("pastor", "name full_name") 
+      .sort({ group_name: 1 });
+      console.log("📦 GROUP COUNT:", groups.length);
     res.json(groups);
   } catch (err) {
     console.error("Error fetching groups:", err);

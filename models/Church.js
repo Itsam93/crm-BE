@@ -1,3 +1,4 @@
+// models/Church.js
 import mongoose from "mongoose";
 
 const churchSchema = new mongoose.Schema(
@@ -11,6 +12,7 @@ const churchSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
       required: true,
+      index: true,  // single index here is cleaner
     },
     pastorName: {
       type: String,
@@ -24,14 +26,47 @@ const churchSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    totalMembers: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    // Optional but useful for future filtering/reporting
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
   },
   { timestamps: true }
 );
 
-// Ensure combination of name + group is unique
-churchSchema.index({ name: 1, group: 1 }, { unique: true });
+// ────────────────────────────────────────────────────────────────
+// Indexes — consolidated and no duplicates
+// ────────────────────────────────────────────────────────────────
+churchSchema.index({ name: 1, group: 1 }, { unique: true });  // keep unique constraint
+churchSchema.index({ totalMembers: -1 });                     // sorting by size
+churchSchema.index({ isActive: 1 });                          // active/inactive filtering
 
-// ✅ Avoid OverwriteModelError
-const Church = mongoose.models.Church || mongoose.model("Church", churchSchema);
+// ────────────────────────────────────────────────────────────────
+// Post-save hook: notify group to update its totalMembers (if needed)
+// ────────────────────────────────────────────────────────────────
+churchSchema.post("save", async function (doc) {
+  // Only run if totalMembers changed
+  if (this.isModified("totalMembers") && doc.group) {
+    const Group = mongoose.model("Group");
+    const total = await mongoose.model("Church").aggregate([
+      { $match: { group: doc.group, isActive: true } },
+      { $group: { _id: null, sum: { $sum: "$totalMembers" } } },
+    ]);
 
-export default Church;
+    await Group.updateOne(
+      { _id: doc.group },
+      { $set: { totalMembers: total[0]?.sum || 0 } }
+    );
+  }
+});
+
+// Prevent overwrite error
+export default mongoose.models.Church || mongoose.model("Church", churchSchema);

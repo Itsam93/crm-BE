@@ -7,7 +7,7 @@ import Member from "../models/Member.js";
 ================================= */
 export const createMarriage = async (req, res) => {
   try {
-    const { husbandId, wifeId, weddingDate } = req.body;
+    const { husbandId, wifeId, weddingDate } = req.body; 
 
     if (!husbandId || !wifeId || !weddingDate) {
       return res.status(400).json({ message: "All fields are required" });

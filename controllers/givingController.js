@@ -7,6 +7,7 @@ import Giving from "../models/Giving.js";
 import Member from "../models/Member.js";
 import Group from "../models/Group.js";
 import Church from "../models/Church.js";
+import Campaign from "../models/Campaign.js";
 import { parse } from "json2csv";
 
 
@@ -39,48 +40,207 @@ const hodArmMap = {
   lwpm_hod: "lwpm"
 };
 
+const ROLE_TO_ARM = {
+  healing_hod: "Healing School",
+  rhapsody_hod: "Rhapsody",
+  ministry_hod: "Ministry Programs",
+  bibles_hod: "LoveWorld Bibles",
+  innercity_hod: "InnerCity Missions",
+  lwpm_hod: "LWPM",
+};
 
-// Add single giving
+// Validate ObjectId
+const isValidId = (id) => Types.ObjectId.isValid(id);
+
+// Normalize date to start/end of day
+const normalizeDateRange = (date) => ({
+  start: new Date(new Date(date).setHours(0, 0, 0, 0)),
+  end: new Date(new Date(date).setHours(23, 59, 59, 999)),
+});
+
+/**
+ * 🔥 SAFE CAMPAIGN RESOLUTION
+ * - Uses explicit campaignId if provided
+ * - Falls back ONLY if exactly one campaign matches date
+ */
+const resolveCampaign = async ({ campaignId, givingDate }) => {
+  if (campaignId && isValidId(campaignId)) {
+    const campaign = await Campaign.findById(campaignId);
+    if (!campaign) {
+      throw new Error("Campaign not found");
+    }
+    return campaign;
+  }
+
+  // 🔍 Fallback: find campaign by date
+  const matches = await Campaign.find({
+    startDate: { $lte: givingDate },
+    endDate: { $gte: givingDate },
+  });
+
+  if (matches.length === 1) {
+    console.warn("⚠️ Auto-attached campaign:", matches[0].name);
+    return matches[0];
+  }
+  
+  if (matches.length > 1) {
+    throw new Error("Multiple campaigns match this date. Please specify campaignId.");
+  }
+
+  throw new Error("No active campaign found for this date.");
+};
+
+/* =========================================================
+   ADD GIVING (BEST PRACTICE)
+========================================================= */
+
 export const addGiving = async (req, res) => {
   try {
-    const { memberId, memberName, amount, arm, groupId, churchId } = req.body;
+    const {
+      memberId,
+      memberName,
+      amount,
+      arm,
+      groupId,
+      churchId,
+      category,
+      date,
+    } = req.body;
 
-    if ((!memberId && !memberName) || !amount || !arm)
+    // =========================
+    // VALIDATION
+    // =========================
+    if ((!memberId && !memberName) || !amount || !arm) {
       return res.status(400).json({ message: "Missing required fields" });
+    }
 
+    if (Number(amount) <= 0) {
+      return res.status(400).json({ message: "Amount must be greater than 0" });
+    }
+
+    // =========================
+    // FIND MEMBER
+    // =========================
     let member;
-
-    // Find by memberId if provided
-    if (memberId) {
+    if (memberId && isValidId(memberId)) {
       member = await Member.findById(memberId);
-      if (!member) return res.status(404).json({ message: "Member not found" });
-    } else {
-      // Find by name only, do NOT create new member
+    } else if (memberName) {
       member = await Member.findOne({ name: memberName });
-      if (!member) {
-        return res.status(404).json({ message: "Member not found in the database" });
+    }
+
+    if (!member) {
+      return res.status(404).json({ message: "Member not found" });
+    }
+
+    // =========================
+    // DATE
+    // =========================
+    const givingDate = date ? new Date(date) : new Date();
+
+    // =========================
+    // CREATE GIVING
+    // =========================
+    const giving = await Giving.create({
+      member: member._id,
+      amount: Number(amount),
+      arm,
+      date: givingDate,
+      group: groupId || member.group || null,
+      church: churchId || member.church || null,
+      category: category || null,
+    });
+
+    console.log("✅ Giving created:", {
+      member: member.name,
+      amount,
+      date: givingDate,
+    });
+
+    return res.status(201).json({
+      message: "Giving recorded successfully",
+      giving,
+    });
+  } catch (err) {
+    console.error("❌ addGiving error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/* =========================================================
+   DEBUG ENDPOINT (VERY IMPORTANT)
+========================================================= */
+
+export const debugCampaignGivings = async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+
+    if (!isValidId(campaignId)) {
+      return res.status(400).json({ message: "Invalid campaignId" });
+    }
+
+    const givings = await Giving.find({
+      campaign: campaignId,
+      deleted: false,
+    }).lean();
+
+    console.log("📊 DEBUG CAMPAIGN GIVINGS COUNT:", givings.length);
+    console.log("📊 SAMPLE:", givings[0]);
+
+    return res.json({
+      count: givings.length,
+      sample: givings[0] || null,
+      data: givings,
+    });
+
+  } catch (err) {
+    console.error("❌ debugCampaignGivings error:", err);
+    res.status(500).json({ message: "Debug failed" });
+  }
+};
+
+/* =========================================================
+   MIGRATION FIX (RUN ONCE)
+========================================================= */
+
+export const fixMissingCampaigns = async (req, res) => {
+  try {
+    const campaigns = await Campaign.find();
+
+    const givings = await Giving.find({ campaign: null });
+
+    let fixed = 0;
+
+    for (const g of givings) {
+      const match = campaigns.find(
+        (c) => g.date >= c.startDate && g.date <= c.endDate
+      );
+
+      if (match) {
+        g.campaign = match._id;
+        await g.save();
+        fixed++;
       }
     }
 
-    const giving = await Giving.create({
-      member: member._id,
-      amount,
-      arm,
-      date: req.body.date ? new Date(req.body.date) : new Date(),
+    console.log(`✅ Fixed ${fixed} givings`);
+
+    return res.json({
+      message: "Migration complete",
+      fixed,
     });
 
-    res.status(201).json({ message: "Giving added successfully", giving });
   } catch (err) {
-    console.error("addGiving error:", err.message);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("❌ Migration error:", err);
+    res.status(500).json({ message: "Migration failed" });
   }
 };
+
 
 
 // Get all givings (with filters + pagination)
 export const getGivings = async (req, res) => {
   try {
-    let { page = 1, limit = 30, arm, groupId, churchId } = req.query;
+    let { page = 1, limit = 30, arm, groupId, churchId, campaignId, category } = req.query;
     let { hodId, q, from, to } = req.query;
 
     // Support custom limit: "all"
@@ -95,6 +255,8 @@ export const getGivings = async (req, res) => {
     const match = { deleted: false };
 
     if (arm) match.arm = arm;
+    if (campaignId) match.campaign = new Types.ObjectId(campaignId);
+    if (category) match.category = category;
 
     if (from || to) {
       match.date = {};
@@ -113,42 +275,42 @@ export const getGivings = async (req, res) => {
     if (churchId) objectFilters["member.church"] = new Types.ObjectId(churchId);
     if (hodId) objectFilters["member.hod"] = new Types.ObjectId(hodId);
 
-    // Base pipeline
+    // Base aggregation pipeline
     const pipeline = [
       { $match: match },
 
-      // Get member
-      { 
-        $lookup: { 
+      // Lookup member
+      {
+        $lookup: {
           from: "members",
           localField: "member",
           foreignField: "_id",
-          as: "member"
-        }
+          as: "member",
+        },
       },
       { $unwind: "$member" },
 
       { $match: objectFilters },
 
-      // Get church
+      // Lookup church
       {
         $lookup: {
           from: "churches",
           localField: "member.church",
           foreignField: "_id",
-          as: "member.church"
-        }
+          as: "member.church",
+        },
       },
       { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
 
-      // Get group
+      // Lookup group
       {
         $lookup: {
           from: "groups",
           localField: "member.group",
           foreignField: "_id",
-          as: "member.group"
-        }
+          as: "member.group",
+        },
       },
       { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
 
@@ -157,6 +319,8 @@ export const getGivings = async (req, res) => {
           amount: 1,
           date: 1,
           arm: 1,
+          campaign: 1,
+          category: 1,
           deleted: 1,
           "member._id": 1,
           "member.name": 1,
@@ -172,19 +336,17 @@ export const getGivings = async (req, res) => {
     ];
 
     // total count BEFORE pagination
-    const total =
-      (await Giving.aggregate([...pipeline, { $count: "total" }]))[0]?.total || 0;
+    const total = (await Giving.aggregate([...pipeline, { $count: "total" }]))[0]?.total || 0;
 
     let rows;
 
-    // If limit = "all", return everything
+    // Return all records if requested
     if (returnAll) {
       rows = await Giving.aggregate(pipeline);
     } else {
       // Normal pagination
       limit = Number(limit);
       page = Number(page);
-
       const skip = (page - 1) * limit;
       pipeline.push({ $skip: skip }, { $limit: limit });
 
@@ -211,35 +373,34 @@ export const getGivings = async (req, res) => {
 export const updateGiving = async (req, res) => {
   try {
     const { id } = req.params;
-    const { memberId, memberName, amount, arm, date, groupId, churchId } = req.body;
 
-    const updateData = {};
-
-    if (memberId) {
-      updateData.member = new Types.ObjectId(memberId);
-    } else if (memberName) {
-      let member = await Member.findOne({ name: memberName });
-      if (!member) {
-        member = await Member.create({
-          name: memberName,
-          group: groupId ? new Types.ObjectId(groupId) : null,
-          church: churchId ? new Types.ObjectId(churchId) : null,
-        });
-      }
-      updateData.member = member._id;
+    const existing = await Giving.findById(id);
+    if (!existing) {
+      return res.status(404).json({ message: "Giving not found" });
     }
 
-    if (amount !== undefined) updateData.amount = amount;
-    if (arm) updateData.arm = arm;
-    if (date) updateData.date = new Date(date);
+    const updateData = { ...req.body };
 
-    const updated = await Giving.findByIdAndUpdate(id, updateData, { new: true });
-    if (!updated) return res.status(404).json({ message: "Giving not found" });
+    if (updateData.amount && updateData.amount <= 0) {
+      return res.status(400).json({ message: "Invalid amount" });
+    }
 
-    res.json({ message: "Giving updated successfully", giving: updated });
+    if (updateData.date) {
+      updateData.date = new Date(updateData.date);
+    }
+
+    const updated = await Giving.findByIdAndUpdate(id, updateData, {
+      new: true,
+    });
+
+    return res.json({
+      message: "Giving updated",
+      giving: updated,
+    });
+
   } catch (err) {
-    console.error("updateGiving error:", err);
-    res.status(500).json({ message: err.message });
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -248,14 +409,42 @@ export const deleteGiving = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Perform HARD DELETE
-    const deletedGiving = await Giving.findByIdAndDelete(id);
+    // =========================
+    // FIND GIVING FIRST
+    // =========================
+    const giving = await Giving.findById(id);
 
-    if (!deletedGiving) {
+    if (!giving) {
       return res.status(404).json({ message: "Giving not found" });
     }
 
-    // Recalculate totals (still correct for hard delete)
+    const { member, campaign, amount } = giving;
+
+    // =========================
+    // DELETE GIVING
+    // =========================
+    await Giving.findByIdAndDelete(id);
+
+    // =========================
+    // UPDATE PARTICIPATION (MCP)
+    // =========================
+    if (campaign && member) {
+      await MemberCampaignParticipation.findOneAndUpdate(
+        {
+          member,
+          campaign,
+        },
+        {
+          $inc: {
+            totalContributed: -amount, // 🔥 reverse contribution
+          },
+        }
+      );
+    }
+
+    // =========================
+    // GLOBAL SUMMARY (OPTIONAL)
+    // =========================
     const givingsAgg = await Giving.aggregate([
       {
         $group: {
@@ -269,13 +458,22 @@ export const deleteGiving = async (req, res) => {
     const totalGivingsAmount = givingsAgg[0]?.totalAmount || 0;
     const totalGivingsCount = givingsAgg[0]?.count || 0;
 
+    // =========================
+    // RESPONSE
+    // =========================
     res.status(200).json({
       message: "Giving deleted successfully",
-      summary: { totalGivingsAmount, totalGivingsCount },
+      summary: {
+        totalGivingsAmount,
+        totalGivingsCount,
+      },
     });
+
   } catch (error) {
     console.error("Error deleting giving:", error);
-    res.status(500).json({ message: "Server error while deleting giving" });
+    res.status(500).json({
+      message: "Server error while deleting giving",
+    });
   }
 };
 
@@ -309,6 +507,8 @@ export const bulkUploadGivings = async (req, res) => {
       const groupName = row.group || row.Group || "";
       const churchName = row.church || row.Church || "";
       const dateVal = row.date || row.Date || "";
+      const campaignName = row.campaign || row.Campaign || "";
+      const categoryName = row.category || row.Category || "";
 
       if (!name || !amount) return;
 
@@ -336,6 +536,12 @@ export const bulkUploadGivings = async (req, res) => {
         newMembers.push({ name, id: memberDoc._id });
       }
 
+      // Find campaign if name exists
+      let campaignDoc = null;
+      if (campaignName) {
+        campaignDoc = await Campaign.findOne({ name: campaignName });
+      }
+
       const givingDate = dateVal ? new Date(dateVal) : new Date();
       const exists = await Giving.findOne({
         member: memberDoc._id,
@@ -345,6 +551,8 @@ export const bulkUploadGivings = async (req, res) => {
           $lte: new Date(givingDate.setHours(23, 59, 59, 999)),
         },
         arm,
+        campaign: campaignDoc?._id || null,
+        category: categoryName || null,
       });
 
       if (exists) {
@@ -353,7 +561,16 @@ export const bulkUploadGivings = async (req, res) => {
         return;
       }
 
-      await Giving.create({ member: memberDoc._id, amount, arm, date: givingDate });
+      await Giving.create({
+        member: memberDoc._id,
+        amount,
+        arm,
+        date: givingDate,
+        group: groupDoc?._id || null,
+        church: churchDoc?._id || null,
+        campaign: campaignDoc?._id || null,
+        category: categoryName || null,
+      });
       createdGivings++;
     };
 
@@ -393,12 +610,14 @@ export const bulkUploadGivings = async (req, res) => {
 // -----------------------
 // Internal helper
 // -----------------------
-export const getReportsInternal = async ({ user, type, from, to }) => {
+export const getReportsInternal = async ({ user, type, from, to, page = 1, limit = 20 }) => {
   const typeMap = {
     individual: "member",
     member: "member",
     group: "group",
     church: "church",
+    campaign: "campaign",
+    category: "category",
   };
 
   type = typeMap[type?.toLowerCase()];
@@ -418,15 +637,18 @@ export const getReportsInternal = async ({ user, type, from, to }) => {
     if (to) baseMatch.date.$lte = new Date(new Date(to).setHours(23, 59, 59, 999));
   }
 
+  // -------------------------------
+  // Aggregation pipeline
+  // -------------------------------
   const pipeline = [
-    // Normalize arm for consistent HOD filtering
+    // Normalize arm for HOD restriction
     {
       $addFields: {
-        normalizedArm: {
-          $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" },
-        },
+        normalizedArm: { $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" } },
       },
     },
+
+    // Match filters
     {
       $match: {
         ...baseMatch,
@@ -437,83 +659,154 @@ export const getReportsInternal = async ({ user, type, from, to }) => {
     // Lookups
     { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
     { $unwind: "$member" },
-
     { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
     { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
-
     { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
     { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
+    { $lookup: { from: "categories", localField: "member.category", foreignField: "_id", as: "member.category" } },
+    { $unwind: { path: "$member.category", preserveNullAndEmptyArrays: true } },
+    { $lookup: { from: "campaigns", localField: "campaign", foreignField: "_id", as: "campaign" } },
+    { $unwind: { path: "$campaign", preserveNullAndEmptyArrays: true } },
 
-    // Aggregations
+    // Group by report type
     {
-      $facet: {
-        rows: [
-          {
-            $group: (() => {
-              switch (type) {
-                case "member":
-                  return {
-                    _id: "$member._id",
-                    name: { $first: "$member.name" },
-                    phone: { $first: "$member.phone" },
-                    church: { $first: "$member.church" },
-                    group: { $first: "$member.group" },
-                    totalAmount: { $sum: "$amount" },
-                    arms: { $push: { arm: "$arm", amount: "$amount" } },
-                  };
-                case "church":
-                  return {
-                    _id: "$member.church._id",
-                    name: { $first: "$member.church.name" },
-                    group: { $first: "$member.group" },
-                    totalAmount: { $sum: "$amount" },
-                    arms: { $push: { arm: "$arm", amount: "$amount" } },
-                  };
-                case "group":
-                  return {
-                    _id: "$member.group._id",
-                    name: { $first: "$member.group.name" },
-                    totalAmount: { $sum: "$amount" },
-                    arms: { $push: { arm: "$arm", amount: "$amount" } },
-                  };
-              }
-            })(),
-          },
-          { $sort: { totalAmount: -1 } },
-        ],
-
-        // Per-arm totals (Admin/HOD)
-        armTotals: [
-          {
-            $group: {
-              _id: "$normalizedArm",
+      $group: (() => {
+        switch (type) {
+          case "member":
+            return {
+              _id: "$member._id",
+              name: { $first: "$member.name" },
+              phone: { $first: "$member.phone" },
+              church: { $first: "$member.church.name" },
+              group: { $first: "$member.group.name" },
+              category: { $first: "$member.category.name" },
+              pledge: { $first: "$member.pledge" },
+              monthlyRaw: {
+                $push: {
+                  month: { $dateToString: { format: "%Y-%m", date: "$date" } },
+                  amount: "$amount",
+                },
+              },
               totalAmount: { $sum: "$amount" },
+            };
+          case "church":
+            return {
+              _id: "$member.church._id",
+              name: { $first: "$member.church.name" },
+              monthlyRaw: {
+                $push: {
+                  month: { $dateToString: { format: "%Y-%m", date: "$date" } },
+                  amount: "$amount",
+                },
+              },
+              totalAmount: { $sum: "$amount" },
+            };
+          case "group":
+            return {
+              _id: "$member.group._id",
+              name: { $first: "$member.group.name" },
+              monthlyRaw: {
+                $push: {
+                  month: { $dateToString: { format: "%Y-%m", date: "$date" } },
+                  amount: "$amount",
+                },
+              },
+              totalAmount: { $sum: "$amount" },
+            };
+          case "campaign":
+            return {
+              _id: "$campaign._id",
+              name: { $first: "$campaign.name" },
+              monthlyRaw: {
+                $push: {
+                  month: { $dateToString: { format: "%Y-%m", date: "$date" } },
+                  amount: "$amount",
+                },
+              },
+              totalAmount: { $sum: "$amount" },
+            };
+          case "category":
+            return {
+              _id: "$member.category._id",
+              name: { $first: "$member.category.name" },
+              monthlyRaw: {
+                $push: {
+                  month: { $dateToString: { format: "%Y-%m", date: "$date" } },
+                  amount: "$amount",
+                },
+              },
+              totalAmount: { $sum: "$amount" },
+            };
+        }
+      })(),
+    },
+
+    // Convert monthlyRaw → monthly object
+    {
+      $addFields: {
+        monthly: {
+          $arrayToObject: {
+            $map: {
+              input: {
+                $setUnion: [{ $map: { input: "$monthlyRaw", as: "m", in: "$$m.month" } }],
+              },
+              as: "monthKey",
+              in: {
+                k: "$$monthKey",
+                v: {
+                  $sum: {
+                    $map: {
+                      input: { $filter: { input: "$monthlyRaw", as: "m", cond: { $eq: ["$$m.month", "$$monthKey"] } } },
+                      as: "x",
+                      in: "$$x.amount",
+                    },
+                  },
+                },
+              },
             },
           },
-        ],
-
-        // Grand total
-        grandTotal: [
-          {
-            $group: {
-              _id: null,
-              totalAmount: { $sum: "$amount" },
-            },
-          },
-        ],
+        },
       },
     },
+    { $project: { monthlyRaw: 0 } },
+
+    { $sort: { totalAmount: -1 } },
+
+    // Pagination
+    { $skip: (page - 1) * limit },
+    { $limit: limit },
   ];
 
-  const [result] = await Giving.aggregate(pipeline);
+  const rows = await Giving.aggregate(pipeline);
+
+  // Compute grand total and monthly totals ignoring pagination
+  const allRows = await Giving.aggregate([
+    {
+      $addFields: {
+        normalizedArm: { $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" } },
+      },
+    },
+    { $match: { ...baseMatch, ...(partnershipArm ? { normalizedArm: partnershipArm } : {}) } },
+    {
+      $group: {
+        _id: null,
+        totalAmount: { $sum: "$amount" },
+        monthlyRaw: {
+          $push: {
+            month: { $dateToString: { format: "%Y-%m", date: "$date" } },
+            amount: "$amount",
+          },
+        },
+      },
+    },
+  ]);
+
+  const grandTotal = allRows[0]?.totalAmount || 0;
 
   return {
-    rows: result.rows,
-    armTotals: result.armTotals.reduce((acc, cur) => {
-      acc[cur._id] = cur.totalAmount;
-      return acc;
-    }, {}),
-    grandTotal: result.grandTotal[0]?.totalAmount || 0,
+    rows,
+    grandTotal,
+    monthly: allRows[0]?.monthlyRaw || [],
   };
 };
 
@@ -532,6 +825,7 @@ export const getReports = async (req, res) => {
 
     const data = await getReportsInternal({ user: req.user, type, from, to });
 
+    // Extra per-arm total for HODs
     let armTotal = 0;
     if (partnershipArm) {
       const match = { deleted: false, normalizedArm: partnershipArm };
@@ -556,7 +850,6 @@ export const getReports = async (req, res) => {
     return res.status(500).json({ message: err.message || "Server error" });
   }
 };
-
 
 
 export const downloadReportsCSV = async (req, res) => {
@@ -676,3 +969,292 @@ export const downloadReportsCSV = async (req, res) => {
     return res.status(500).json({ message: "Error generating CSV" });
   }
 };
+
+
+
+/* =========================================================
+   GET HOD REPORTS (MAIN FUNCTION)
+========================================================= */
+export const getHodReport = async (req, res) => {
+  try {
+    console.log("🚀 HOD REPORT REQUEST STARTED");
+
+    const { type = "individual", from, to, page = 1, limit = 20 } = req.query;
+    const role = req.user?.role;
+
+    if (!role) return res.status(401).json({ message: "Unauthorized" });
+
+    const arm = ROLE_TO_ARM[role];
+    if (!arm) return res.status(403).json({ message: "Invalid HOD role" });
+
+    console.log("🎯 HOD Arm:", arm);
+
+    const normalizedArm = arm.toLowerCase().replace(/\s+/g, "_");
+
+    /* =========================================================
+       1️⃣ GET CAMPAIGN (FOR MCP ONLY)
+    ========================================================= */
+    const campaign = await Campaign.findOne({
+      arm: new RegExp(`^${arm}$`, "i"),
+      deleted: false,
+    }).sort({ startDate: -1 });
+
+    if (!campaign) {
+      console.log("⚠️ No campaign found");
+    } else {
+      console.log("📌 Campaign:", campaign.name);
+    }
+
+    /* =========================================================
+       2️⃣ MATCH GIVINGS BY ARM
+    ========================================================= */
+    const match = {
+      deleted: false,
+      $expr: {
+        $eq: [
+          {
+            $replaceAll: {
+              input: { $toLower: "$arm" },
+              find: " ",
+              replacement: "_",
+            },
+          },
+          normalizedArm,
+        ],
+      },
+    };
+
+    if (from || to) {
+      match.date = {};
+      if (from) match.date.$gte = new Date(from);
+      if (to) {
+        const d = new Date(to);
+        d.setHours(23, 59, 59, 999);
+        match.date.$lte = d;
+      }
+    }
+
+    console.log("🔎 MATCH:", JSON.stringify(match));
+
+    /* =========================================================
+       3️⃣ GROUP FIELD
+    ========================================================= */
+    let groupIdField = "$member._id";
+    if (type === "church") groupIdField = "$church._id";
+    if (type === "group") groupIdField = "$group._id";
+
+    /* =========================================================
+       4️⃣ PIPELINE
+    ========================================================= */
+    const pipeline = [
+      { $match: match },
+
+      // MEMBER
+      {
+        $lookup: {
+          from: "members",
+          localField: "member",
+          foreignField: "_id",
+          as: "member",
+        },
+      },
+      { $unwind: { path: "$member", preserveNullAndEmptyArrays: true } },
+
+      // GROUP
+      {
+        $lookup: {
+          from: "groups",
+          localField: "member.group",
+          foreignField: "_id",
+          as: "group",
+        },
+      },
+      { $unwind: { path: "$group", preserveNullAndEmptyArrays: true } },
+
+      // CHURCH
+      {
+        $lookup: {
+          from: "churches",
+          localField: "member.church",
+          foreignField: "_id",
+          as: "church",
+        },
+      },
+      { $unwind: { path: "$church", preserveNullAndEmptyArrays: true } },
+
+      /* =============================
+         🔥 MCP (FIXED: ONLY WHEN CAMPAIGN EXISTS)
+      ============================= */
+      ...(campaign
+        ? [
+            {
+              $lookup: {
+                from: "membercampaignparticipations",
+                let: { memberId: "$member._id" },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: {
+                        $and: [
+                          { $eq: ["$member", "$$memberId"] },
+                          { $eq: ["$campaign", campaign._id] },
+                        ],
+                      },
+                    },
+                  },
+                ],
+                as: "mcp",
+              },
+            },
+            {
+              $unwind: {
+                path: "$mcp",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+          ]
+        : []),
+
+      // CATEGORY FROM MCP
+      {
+        $lookup: {
+          from: "categories",
+          localField: "mcp.pledgedCategory",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+
+      /* =============================
+         GROUPING
+      ============================= */
+      {
+        $group: {
+          _id: groupIdField,
+
+          name: { $first: "$member.name" },
+          phone: { $first: "$member.phone" },
+          church: { $first: "$church.name" },
+
+          group: { $first: "$group.group_name" },
+
+          category: { $first: "$category.name" },
+          pledgeAmount: { $first: "$mcp.targetAmount" },
+
+          totalAmount: { $sum: "$amount" },
+
+          monthlyRaw: {
+            $push: {
+              month: {
+                $dateToString: {
+                  format: "%Y-%m",
+                  date: "$date",
+                },
+              },
+              amount: "$amount",
+            },
+          },
+        },
+      },
+
+      /* =============================
+         MONTHLY MAP
+      ============================= */
+      {
+        $addFields: {
+          monthly: {
+            $arrayToObject: {
+              $map: {
+                input: {
+                  $setUnion: [
+                    {
+                      $map: {
+                        input: "$monthlyRaw",
+                        as: "m",
+                        in: "$$m.month",
+                      },
+                    },
+                  ],
+                },
+                as: "monthKey",
+                in: {
+                  k: "$$monthKey",
+                  v: {
+                    $sum: {
+                      $map: {
+                        input: {
+                          $filter: {
+                            input: "$monthlyRaw",
+                            as: "m",
+                            cond: {
+                              $eq: ["$$m.month", "$$monthKey"],  
+                            },
+                          },
+                        },
+                        as: "x",
+                        in: "$$x.amount",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+
+      { $project: { monthlyRaw: 0 } },
+
+      { $sort: { totalAmount: -1 } },
+      { $skip: (parseInt(page) - 1) * parseInt(limit) },
+      { $limit: parseInt(limit) },
+    ];
+
+    const rows = await Giving.aggregate(pipeline);
+
+    console.log("📊 Rows:", rows.length);
+
+    /* =========================================================
+       ALL ROWS
+    ========================================================= */
+    const allRowsPipeline = [...pipeline];
+    allRowsPipeline.pop();
+    allRowsPipeline.pop();
+
+    const allRows = await Giving.aggregate(allRowsPipeline);
+
+    const grandTotal = allRows.reduce(
+      (acc, g) => acc + (g.totalAmount || 0),
+      0
+    );
+
+    /* =========================================================
+       NORMALIZATION
+    ========================================================= */
+    const normalize = (v, d = "-") => (v || v === 0 ? v : d);
+
+    rows.forEach((r) => {
+      r.name = normalize(r.name, "Unnamed");
+      r.phone = normalize(r.phone);
+      r.church = normalize(r.church);
+      r.group = normalize(r.group);
+      r.category = normalize(r.category, "Uncategorized");
+      r.pledgeAmount = normalize(r.pledgeAmount, 0);
+    });
+
+    console.log("✅ HOD REPORT READY");
+
+    return res.json({
+      data: {
+        rows,
+        allRows,
+        grandTotal,
+        meta: { total: allRows.length },
+      },
+    });
+  } catch (err) {
+    console.error("❌ HOD REPORT ERROR:", err);
+    return res.status(500).json({ message: "Server error" });
+  } 
+};  

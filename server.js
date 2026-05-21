@@ -1,6 +1,3 @@
-// ============================================================
-// 📦 Imports & Setup
-// ============================================================
 import express from "express";
 import dotenv from "dotenv";
 import helmet from "helmet";
@@ -16,10 +13,14 @@ import partnershipRoutes from "./routes/partnershipRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import churchRoutes from "./routes/churchRoutes.js";
+import groupRoutes from "./routes/groupRoutes.js";
 import memberRoutes from "./routes/memberRoutes.js";
 import givingRoutes from "./routes/givingRoutes.js";
 import hodRoutes from "./routes/hodRoutes.js";
 import marriageRoutes from "./routes/marriageRoutes.js";
+import campaignGivingsRoutes from "./routes/campaignGivings.js";
+import campaignRoutes from "./routes/campaignRoutes.js";
+import categoryRoutes from "./routes/categoryRoutes.js";
 
 // ============================================================
 // 🌍 Environment & Database
@@ -52,7 +53,7 @@ app.use(
         return callback(new Error("Not allowed by CORS"));
       }
     },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
   })
@@ -88,12 +89,16 @@ app.use("/api/partners", partnershipRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/churches", churchRoutes);
+app.use("/api/groups", groupRoutes);
 app.use("/api/members", memberRoutes);
 app.use("/api/givings", givingRoutes);
 app.use("/api/hod", hodRoutes);
 app.use("/api/marriages", marriageRoutes);
 app.use("/api/admin/marriages", marriageRoutes);
 app.use("/api/admin/members", memberRoutes);
+app.use("/api/campaignGivings", campaignGivingsRoutes);
+app.use("/api/campaigns", campaignRoutes);
+app.use("/api/categories", categoryRoutes);
 
 
 // ============================================================

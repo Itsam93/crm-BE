@@ -7,11 +7,13 @@ import {
   updateMember,
   deleteMember,
   bulkUploadMembers,
+  bulkUpdateMembers, 
   submitUpdateRequest,
   reviewUpdateRequest,
   getMemberProfile,
   searchMembers,
   getUpcomingAnniversaries,
+  getMembersByChurch,
 } from "../controllers/memberController.js";
 
 const router = express.Router();
@@ -28,28 +30,41 @@ const adminOnly = [requireAdmin];
 const upload = multer({ dest: "uploads/" });
 
 // ============================================================
-// 🔍 SEARCH 
+// 🔍 SEARCH
 // ============================================================
-router.get("/search", (req, res, next) => {
-   next();
-}, searchMembers);
-
+router.get("/search", searchMembers);
 
 // ============================================================
-// 📋 MEMBERS LIST (admin only)
+// 📋 MEMBERS LIST
 // ============================================================
 router.get("/", getMembers);
+
+// ============================================================
+// ⛪ MEMBERS BY CHURCH
+// ============================================================
+router.get("/church/:churchId", getMembersByChurch);
 
 // ============================================================
 // ➕➖ CRUD (admin only)
 // ============================================================
 router.post("/", ...adminOnly, createMember);
+
+// 🔹 ✅ Bulk update (group / church changes)
+router.put(
+  "/bulk-update",
+  ...adminOnly,
+  bulkUpdateMembers
+);
+
+
 router.put("/:id", ...adminOnly, updateMember);
 router.delete("/:id", ...adminOnly, deleteMember);
 
 // ============================================================
-// 📦 BULK UPLOAD (admin only)
+// 📦 BULK OPERATIONS (admin only)
 // ============================================================
+
+// 🔹 Bulk upload (Excel)
 router.post(
   "/bulk",
   ...adminOnly,
@@ -57,19 +72,25 @@ router.post(
   bulkUploadMembers
 );
 
+
 // ============================================================
-// MEMBER UPDATE REQUESTS
+// 📝 MEMBER UPDATE REQUESTS
 // ============================================================
 router.post("/:id/request-update", submitUpdateRequest);
 router.post("/:id/review-update", ...adminOnly, reviewUpdateRequest);
 
 // ============================================================
-// 👤 MEMBER PROFILE (admin only)
+// 👤 MEMBER PROFILE
 // ============================================================
 router.get("/:id/profile", getMemberProfile);
 
-// Upcoming wedding anniversaries (admin only)
-router.get("/upcoming-anniversaries", ...adminOnly, getUpcomingAnniversaries);
-
+// ============================================================
+// 💍 ANNIVERSARIES (admin only)
+// ============================================================
+router.get(
+  "/upcoming-anniversaries",
+  ...adminOnly,
+  getUpcomingAnniversaries
+);
 
 export default router;
