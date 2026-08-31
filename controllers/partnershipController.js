@@ -20,12 +20,12 @@ export const addGiving = async (req, res) => {
       member = await Member.create({
         name: memberName,
         church: churchId || null,
-        group: groupId || null,
+        group: groupId || null, 
       });
-    }
+    } 
 
-    const giving = await Giving.create({
-      member: member._id,
+    const giving = await Giving.create({ 
+      member: member._id, 
       amount,
       partnershipArm,
       date: date || new Date(),

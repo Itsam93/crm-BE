@@ -16,33 +16,63 @@ const memberRequestSchema = new mongoose.Schema(
       index: true,
     },
 
-    submittedByMember: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Member",
-      default: null,
-      index: true,
-    },
-
-    submittedName: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-
-    submittedPhone: {
-      type: String,
-      trim: true,
-      default: "",
-    },
-
     data: {
-      type: Object,
-      required: true,
+      name: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+
+      phone: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+
+      email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        default: "",
+      },
+
+      birthday: {
+        type: Date,
+        default: null,
+      },
+
+      kingschatId: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+
+      group: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Group",
+        required: true,
+      },
+
+      church: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Church",
+        required: true,
+      },
+
+      hod: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Hod",
+        default: null,
+      },
     },
 
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected"],
+      enum: [
+        "pending",
+        "approved",
+        "rejected",
+      ],
       default: "pending",
       index: true,
     },
@@ -86,6 +116,7 @@ const memberRequestSchema = new mongoose.Schema(
   }
 );
 
+
 memberRequestSchema.index({
   status: 1,
   type: 1,
@@ -98,12 +129,13 @@ memberRequestSchema.index({
 });
 
 memberRequestSchema.index({
-  submittedByMember: 1,
+  "data.group": 1,
 });
 
 memberRequestSchema.index({
-  reviewedBy: 1,
+  "data.church": 1,
 });
+
 
 export default mongoose.models.MemberRequest ||
   mongoose.model("MemberRequest", memberRequestSchema);

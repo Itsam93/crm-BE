@@ -1,5 +1,57 @@
 import mongoose from "mongoose";
 
+const memberDataSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+    },
+
+    phone: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: "",
+    },
+
+    birthday: {
+      type: Date,
+      default: null,
+    },
+
+    kingschatId: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    group: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Group",
+    },
+
+    church: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Church",
+    },
+
+    hod: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Hod",
+      default: null,
+    },
+  },
+  {
+    _id: false,
+  }
+);
+
 const memberRequestSchema = new mongoose.Schema(
   {
     type: {
@@ -26,7 +78,7 @@ const memberRequestSchema = new mongoose.Schema(
     submittedName: {
       type: String,
       trim: true,
-      default: "",
+      required: true,
     },
 
     submittedPhone: {
@@ -36,7 +88,7 @@ const memberRequestSchema = new mongoose.Schema(
     },
 
     data: {
-      type: Object,
+      type: memberDataSchema,
       required: true,
     },
 
@@ -105,5 +157,10 @@ memberRequestSchema.index({
   reviewedBy: 1,
 });
 
+memberRequestSchema.index({
+  submittedPhone: 1,
+  status: 1,
+});
+
 export default mongoose.models.MemberRequest ||
-  mongoose.model("MemberRequest", memberRequestSchema);
+  mongoose.model("MemberRequest", memberRequestSchema); 

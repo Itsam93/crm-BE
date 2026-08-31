@@ -21,10 +21,8 @@ import marriageRoutes from "./routes/marriageRoutes.js";
 import campaignGivingsRoutes from "./routes/campaignGivings.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
+import ministryYearRoutes from "./routes/ministryYearRoutes.js";
 
-// ============================================================
-// 🌍 Environment & Database
-// ============================================================
 dotenv.config();
 connectDB();
 
@@ -32,10 +30,6 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ============================================================
-// 🔐 CORS Configuration
-// ============================================================
-// ✅ Allow localhost (dev) and Vercel frontend (prod)
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -59,15 +53,9 @@ app.use(
   })
 );
 
-// ============================================================
-// 🛡 Security & Logging
-// ============================================================
 app.use(helmet());
 app.use(morgan("dev"));
 
-// ============================================================
-// 🧩 Mongoose Schema (for Excel Uploads)
-// ============================================================
 const contributionSchema = new mongoose.Schema(
   {
     fullName: { type: String, required: true },
@@ -81,9 +69,6 @@ const contributionSchema = new mongoose.Schema(
 contributionSchema.index({ fullName: 1, partnershipArm: 1, date: 1 }, { unique: true });
 const Contribution = mongoose.model("Contribution", contributionSchema);
 
-// ============================================================
-// 🧭 Routes
-// ============================================================
 app.use("/api/auth", authRoutes);
 app.use("/api/partners", partnershipRoutes);
 app.use("/api/admin", adminRoutes);
@@ -99,11 +84,9 @@ app.use("/api/admin/members", memberRoutes);
 app.use("/api/campaignGivings", campaignGivingsRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/ministry-years", ministryYearRoutes);
 
 
-// ============================================================
-// 📤 Excel File Upload Route
-// ============================================================
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
@@ -153,26 +136,14 @@ app.post("/api/partners/upload", upload.single("file"), async (req, res) => {
   }
 });
 
-// ============================================================
-// 🌐 Root Route
-// ============================================================
 app.get("/", (req, res) => res.json({ message: "🚀 CRM Backend API running successfully!" }));
 
-// ============================================================
-// 🚫 404 Handler
-// ============================================================
 app.use((req, res, next) => res.status(404).json({ message: "Route not found" }));
 
-// ============================================================
-// 💥 Global Error Handler
-// ============================================================
 app.use((err, req, res, next) => {
   console.error("💥 Global Error:", err.message);
   res.status(500).json({ message: err.message || "Internal Server Error" });
 });
 
-// ============================================================
-// 🚀 Start Server
-// ============================================================
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

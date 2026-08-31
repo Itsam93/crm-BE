@@ -165,7 +165,7 @@ export const getGroups = async (req, res) => {
   } catch (err) {
     console.error("Error fetching groups:", err);
     res.status(500).json({ message: "Server error while fetching groups" });
-  }
+  } 
 };
 
 // Delete a group
