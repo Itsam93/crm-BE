@@ -1680,662 +1680,241 @@ export const getReportsInternal = async ({
 
 export const getReports = async (req, res) => {
   try {
-    const {
-      type,
-      from,
-      to,
-      ministryYear,
-      arm,
-    } = req.query;
+    const { type, from, to } = req.query;
 
-    if (!req.user) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
 
-    const partnershipArm =
-      req.user.role?.endsWith("_hod")
-        ? hodArmMap[req.user.role]?.toLowerCase()
-        : null;
+    const partnershipArm = req.user.role?.endsWith("_hod")
+      ? hodArmMap[req.user.role]?.toLowerCase()
+      : null;
 
-    const data = await getReportsInternal({
-      user: req.user,
-      type,
-      from,
-      to,
-      ministryYear,
-      arm,
-    });
+    const data = await getReportsInternal({ user: req.user, type, from, to });
 
+    // Extra per-arm total for HODs
     let armTotal = 0;
-
     if (partnershipArm) {
-      const baseMatch = {
-        deleted: false,
-      };
-
-      if (ministryYear) {
-        baseMatch.ministryYear =
-          String(ministryYear);
-      }
-
+      const match = { deleted: false, normalizedArm: partnershipArm };
       if (from || to) {
-        baseMatch.date = {};
-
-        if (from) {
-          baseMatch.date.$gte =
-            new Date(
-              new Date(from).setHours(
-                0,
-                0,
-                0,
-                0
-              )
-            );
-        }
-
-        if (to) {
-          baseMatch.date.$lte =
-            new Date(
-              new Date(to).setHours(
-                23,
-                59,
-                59,
-                999
-              )
-            );
-        }
+        match.date = {};
+        if (from) match.date.$gte = new Date(new Date(from).setHours(0, 0, 0, 0));
+        if (to) match.date.$lte = new Date(new Date(to).setHours(23, 59, 59, 999));
       }
 
-      const armTotalAgg =
-        await Giving.aggregate([
-          {
-            $addFields: {
-              normalizedArm: {
-                $replaceAll: {
-                  input: {
-                    $toLower: "$arm",
-                  },
-                  find: " ",
-                  replacement: "_",
-                },
-              },
-            },
-          },
+      const armTotalAgg = await Giving.aggregate([
+        { $addFields: { normalizedArm: { $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" } } } },
+        { $match: match },
+        { $group: { _id: null, totalAmount: { $sum: "$amount" } } },
+      ]);
 
-          {
-            $match: {
-              ...baseMatch,
-
-              normalizedArm:
-                partnershipArm,
-            },
-          },
-
-          {
-            $group: {
-              _id: null,
-
-              totalAmount: {
-                $sum: "$amount",
-              },
-            },
-          },
-        ]);
-
-      armTotal =
-        armTotalAgg[0]?.totalAmount || 0;
+      armTotal = armTotalAgg[0]?.totalAmount || 0;
     }
 
-    return res.json({
-      data,
-      armTotal,
-    });
+    return res.json({ data, armTotal });
   } catch (err) {
     console.error("getReports error:", err);
-
-    return res.status(500).json({
-      message: err.message || "Server error",
-    });
+    return res.status(500).json({ message: err.message || "Server error" });
   }
 };
 
-/* =========================================================
-   DOWNLOAD REPORT CSV
-========================================================= */
 
 export const downloadReportsCSV = async (req, res) => {
   try {
-    const {
-      type = "member",
-      from,
-      to,
-      ministryYear,
-      arm,
-    } = req.query;
+    const { type = "member", from, to } = req.query;
 
-    if (!req.user) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
+    if (!req.user) return res.status(401).json({ message: "Unauthorized" });
 
-    const partnershipArm =
-      req.user.role?.endsWith("_hod")
-        ? hodArmMap[req.user.role]?.toLowerCase()
-        : null;
+    // Determine HOD arm if user is a HOD
+    const partnershipArm = req.user.role?.endsWith("_hod")
+      ? hodArmMap[req.user.role]?.toLowerCase()
+      : null;
 
-    const match = {
-      deleted: false,
-    };
-
-    if (ministryYear) {
-      match.ministryYear =
-        String(ministryYear);
-    }
-
+    // Build base match for date filtering
+    const match = { deleted: false };
     if (from || to) {
       match.date = {};
-
-      if (from) {
-        match.date.$gte =
-          new Date(
-            new Date(from).setHours(
-              0,
-              0,
-              0,
-              0
-            )
-          );
-      }
-
-      if (to) {
-        match.date.$lte =
-          new Date(
-            new Date(to).setHours(
-              23,
-              59,
-              59,
-              999
-            )
-          );
-      }
+      if (from) match.date.$gte = new Date(new Date(from).setHours(0, 0, 0, 0));
+      if (to) match.date.$lte = new Date(new Date(to).setHours(23, 59, 59, 999));
     }
 
+    if (partnershipArm) {
+      match.normalizedArm = partnershipArm;
+    }
+
+    // Normalize type
     const typeMap = {
       individual: "member",
       member: "member",
       group: "group",
       church: "church",
-      campaign: "campaign",
-      category: "category",
     };
+    const reportType = typeMap[type.toLowerCase()];
+    if (!reportType) return res.status(400).json({ message: "Invalid report type" });
 
-    const reportType =
-      typeMap[
-        String(type).toLowerCase()
-      ];
-
-    if (!reportType) {
-      return res.status(400).json({
-        message: "Invalid report type",
-      });
-    }
-
+    // Aggregation pipeline
     const pipeline = [
+      // Normalize arm
       {
         $addFields: {
-          normalizedArm: {
-            $replaceAll: {
-              input: {
-                $toLower: "$arm",
-              },
-              find: " ",
-              replacement: "_",
-            },
-          },
+          normalizedArm: { $replaceAll: { input: { $toLower: "$arm" }, find: " ", replacement: "_" } },
         },
       },
-
+      { $match: match },
+      { $lookup: { from: "members", localField: "member", foreignField: "_id", as: "member" } },
+      { $unwind: "$member" },
+      { $lookup: { from: "churches", localField: "member.church", foreignField: "_id", as: "member.church" } },
+      { $unwind: { path: "$member.church", preserveNullAndEmptyArrays: true } },
+      { $lookup: { from: "groups", localField: "member.group", foreignField: "_id", as: "member.group" } },
+      { $unwind: { path: "$member.group", preserveNullAndEmptyArrays: true } },
       {
-        $match: {
-          ...match,
-
-          ...(partnershipArm
-            ? {
-                normalizedArm:
-                  partnershipArm,
-              }
-            : {}),
-
-          ...(arm
-            ? {
-                arm: normalizeArm(arm),
-              }
-            : {}),
-        },
-      },
-
-      {
-        $lookup: {
-          from: "members",
-          localField: "member",
-          foreignField: "_id",
-          as: "member",
-        },
-      },
-
-      {
-        $unwind: "$member",
-      },
-
-      {
-        $lookup: {
-          from: "churches",
-          localField: "member.church",
-          foreignField: "_id",
-          as: "member.church",
-        },
-      },
-
-      {
-        $unwind: {
-          path: "$member.church",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      {
-        $lookup: {
-          from: "groups",
-          localField: "member.group",
-          foreignField: "_id",
-          as: "member.group",
-        },
-      },
-
-      {
-        $unwind: {
-          path: "$member.group",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      /* ===================================================
-         CAMPAIGN LOOKUP
-      =================================================== */
-
-      {
-        $lookup: {
-          from: "campaigns",
-          localField: "campaign",
-          foreignField: "_id",
-          as: "campaign",
-        },
-      },
-
-      {
-        $unwind: {
-          path: "$campaign",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      {
-        $group:
-          reportType === "member"
-            ? {
+        $group: (() => {
+          switch (reportType) {
+            case "member":
+              return {
                 _id: "$member._id",
-
-                name: {
-                  $first: "$member.name",
-                },
-
-                phone: {
-                  $first: "$member.phone",
-                },
-
-                church: {
-                  $first:
-                    "$member.church.name",
-                },
-
-                group: {
-                  $first:
-                    "$member.group.name",
-                },
-
-                totalAmount: {
-                  $sum: "$amount",
-                },
-
-                arms: {
-                  $push: {
-                    arm: "$arm",
-                    amount: "$amount",
-                  },
-                },
-              }
-            : reportType === "group"
-            ? {
+                name: { $first: "$member.name" },
+                phone: { $first: "$member.phone" },
+                church: { $first: "$member.church.name" },
+                group: { $first: "$member.group.name" },
+                totalAmount: { $sum: "$amount" },
+                arms: { $push: { arm: "$arm", amount: "$amount" } },
+              };
+            case "group":
+              return {
                 _id: "$member.group._id",
-
-                name: {
-                  $first:
-                    "$member.group.name",
-                },
-
-                totalAmount: {
-                  $sum: "$amount",
-                },
-
-                arms: {
-                  $push: {
-                    arm: "$arm",
-                    amount: "$amount",
-                  },
-                },
-              }
-            : reportType === "church"
-            ? {
+                name: { $first: "$member.group.name" },
+                totalAmount: { $sum: "$amount" },
+                arms: { $push: { arm: "$arm", amount: "$amount" } },
+              };
+            case "church":
+              return {
                 _id: "$member.church._id",
-
-                name: {
-                  $first:
-                    "$member.church.name",
-                },
-
-                group: {
-                  $first:
-                    "$member.group.name",
-                },
-
-                totalAmount: {
-                  $sum: "$amount",
-                },
-
-                arms: {
-                  $push: {
-                    arm: "$arm",
-                    amount: "$amount",
-                  },
-                },
-              }
-            : reportType === "campaign"
-            ? {
-                _id: "$campaign._id",
-
-                name: {
-                  $first:
-                    "$campaign.name",
-                },
-
-                totalAmount: {
-                  $sum: "$amount",
-                },
-
-                arms: {
-                  $push: {
-                    arm: "$arm",
-                    amount: "$amount",
-                  },
-                },
-              }
-            : {
-                _id: "$category",
-
-                name: {
-                  $first: "$category",
-                },
-
-                totalAmount: {
-                  $sum: "$amount",
-                },
-
-                arms: {
-                  $push: {
-                    arm: "$arm",
-                    amount: "$amount",
-                  },
-                },
-              },
+                name: { $first: "$member.church.name" },
+                group: { $first: "$member.group.name" },
+                totalAmount: { $sum: "$amount" },
+                arms: { $push: { arm: "$arm", amount: "$amount" } },
+              };
+          }
+        })(),
       },
-
-      {
-        $sort: {
-          totalAmount: -1,
-        },
-      },
+      { $sort: { totalAmount: -1 } },
     ];
 
-    const rows =
-      await Giving.aggregate(pipeline);
+    const rows = await Giving.aggregate(pipeline);
 
     if (!rows || rows.length === 0) {
-      return res.status(404).json({
-        message:
-          "No records found for the selected filters",
-      });
+      return res.status(404).json({ message: "No records found for the selected filters" });
     }
 
+    // Convert aggregation result to CSV
     const csv = parse(
       rows.map((row) => {
         const result = {
           id: row._id,
           name: row.name || "TOTAL",
           totalAmount: row.totalAmount,
-
-          arms: row.arms
-            ? row.arms
-                .map(
-                  (a) =>
-                    `${a.arm}:${a.amount}`
-                )
-                .join("; ")
-            : "",
+          arms: row.arms ? row.arms.map((a) => `${a.arm}:${a.amount}`).join("; ") : "",
         };
-
         if (reportType === "member") {
-          result.phone =
-            row.phone || "";
-
-          result.church =
-            row.church || "";
-
-          result.group =
-            row.group || "";
+          result.phone = row.phone || "";
+          result.church = row.church || "";
+          result.group = row.group || "";
         }
-
         if (reportType === "church") {
-          result.group =
-            row.group || "";
+          result.group = row.group || "";
         }
-
         return result;
       })
     );
 
-    res.header(
-      "Content-Type",
-      "text/csv"
-    );
-
-    res.attachment(
-      `report-${reportType}-${Date.now()}.csv`
-    );
-
+    res.header("Content-Type", "text/csv");
+    res.attachment(`report-${reportType}-${Date.now()}.csv`);
     return res.send(csv);
   } catch (err) {
-    console.error(
-      "downloadReportsCSV error:",
-      err
-    );
-
-    return res.status(500).json({
-      message:
-        "Error generating CSV",
-    });
+    console.error("downloadReportsCSV error:", err);
+    return res.status(500).json({ message: "Error generating CSV" });
   }
 };
 
-/* =========================================================
-   HOD REPORT
-========================================================= */
 
+
+/* =========================================================
+   GET HOD REPORTS (MAIN FUNCTION)
+========================================================= */
 export const getHodReport = async (req, res) => {
   try {
-    console.log(
-      "🚀 HOD REPORT REQUEST STARTED"
-    );
+    console.log("🚀 HOD REPORT REQUEST STARTED");
 
-    const {
-      type = "individual",
-      from,
-      to,
-      page = 1,
-      limit = 20,
-      ministryYear,
-    } = req.query;
-
+    const { type = "individual", from, to, page = 1, limit = 20 } = req.query;
     const role = req.user?.role;
 
-    if (!role) {
-      return res.status(401).json({
-        message: "Unauthorized",
-      });
-    }
+    if (!role) return res.status(401).json({ message: "Unauthorized" });
 
     const arm = ROLE_TO_ARM[role];
+    if (!arm) return res.status(403).json({ message: "Invalid HOD role" });
 
-    if (!arm) {
-      return res.status(403).json({
-        message: "Invalid HOD role",
-      });
-    }
+    console.log("🎯 HOD Arm:", arm);
 
-    console.log(
-      "🎯 HOD Arm:",
-      arm
-    );
+    const normalizedArm = arm.toLowerCase().replace(/\s+/g, "_");
 
-    const normalizedArm = arm
-      .toLowerCase()
-      .replace(/\s+/g, "_");
-
-    /* =====================================================
-       CAMPAIGN
-    ===================================================== */
-
-    const campaign =
-      await Campaign.findOne({
-        arm: new RegExp(
-          `^${escapeRegex(arm)}$`,
-          "i"
-        ),
-        deleted: false,
-      }).sort({
-        startDate: -1,
-      });
+    /* =========================================================
+       1️⃣ GET CAMPAIGN (FOR MCP ONLY)
+    ========================================================= */
+    const campaign = await Campaign.findOne({
+      arm: new RegExp(`^${arm}$`, "i"),
+      deleted: false,
+    }).sort({ startDate: -1 });
 
     if (!campaign) {
-      console.log(
-        "⚠️ No campaign found"
-      );
+      console.log("⚠️ No campaign found");
     } else {
-      console.log(
-        "📌 Campaign:",
-        campaign.name
-      );
+      console.log("📌 Campaign:", campaign.name);
     }
 
-    /* =====================================================
-       MATCH
-    ===================================================== */
-
+    /* =========================================================
+       2️⃣ MATCH GIVINGS BY ARM
+    ========================================================= */
     const match = {
       deleted: false,
-
       $expr: {
         $eq: [
           {
             $replaceAll: {
-              input: {
-                $toLower: "$arm",
-              },
-
+              input: { $toLower: "$arm" },
               find: " ",
-
               replacement: "_",
             },
           },
-
           normalizedArm,
         ],
       },
     };
 
-    if (ministryYear) {
-      match.ministryYear =
-        String(ministryYear);
-    }
-
     if (from || to) {
       match.date = {};
-
-      if (from) {
-        match.date.$gte =
-          new Date(from);
-      }
-
+      if (from) match.date.$gte = new Date(from);
       if (to) {
-        const d =
-          new Date(to);
-
-        d.setHours(
-          23,
-          59,
-          59,
-          999
-        );
-
-        match.date.$lte =
-          d;
+        const d = new Date(to);
+        d.setHours(23, 59, 59, 999);
+        match.date.$lte = d;
       }
     }
 
-    console.log(
-      "🔎 MATCH:",
-      JSON.stringify(match)
-    );
+    console.log("🔎 MATCH:", JSON.stringify(match));
 
-    /* =====================================================
-       GROUP FIELD
-    ===================================================== */
+    /* =========================================================
+       3️⃣ GROUP FIELD
+    ========================================================= */
+    let groupIdField = "$member._id";
+    if (type === "church") groupIdField = "$church._id";
+    if (type === "group") groupIdField = "$group._id";
 
-    let groupIdField =
-      "$member._id";
-
-    if (type === "church") {
-      groupIdField =
-        "$church._id";
-    }
-
-    if (type === "group") {
-      groupIdField =
-        "$group._id";
-    }
-
-    /* =====================================================
-       PIPELINE
-    ===================================================== */
-
+    /* =========================================================
+       4️⃣ PIPELINE
+    ========================================================= */
     const pipeline = [
-      {
-        $match: match,
-      },
+      { $match: match },
 
-      /* MEMBER */
+      // MEMBER
       {
         $lookup: {
           from: "members",
@@ -2344,15 +1923,9 @@ export const getHodReport = async (req, res) => {
           as: "member",
         },
       },
+      { $unwind: { path: "$member", preserveNullAndEmptyArrays: true } },
 
-      {
-        $unwind: {
-          path: "$member",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      /* GROUP */
+      // GROUP
       {
         $lookup: {
           from: "groups",
@@ -2361,15 +1934,9 @@ export const getHodReport = async (req, res) => {
           as: "group",
         },
       },
+      { $unwind: { path: "$group", preserveNullAndEmptyArrays: true } },
 
-      {
-        $unwind: {
-          path: "$group",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      /* CHURCH */
+      // CHURCH
       {
         $lookup: {
           from: "churches",
@@ -2378,154 +1945,87 @@ export const getHodReport = async (req, res) => {
           as: "church",
         },
       },
+      { $unwind: { path: "$church", preserveNullAndEmptyArrays: true } },
 
-      {
-        $unwind: {
-          path: "$church",
-          preserveNullAndEmptyArrays: true,
-        },
-      },
-
-      /* ===================================================
-         MCP
-      =================================================== */
-
+      /* =============================
+         🔥 MCP (FIXED: ONLY WHEN CAMPAIGN EXISTS)
+      ============================= */
       ...(campaign
         ? [
             {
               $lookup: {
-                from:
-                  "membercampaignparticipations",
-
-                let: {
-                  memberId:
-                    "$member._id",
-                },
-
+                from: "membercampaignparticipations",
+                let: { memberId: "$member._id" },
                 pipeline: [
                   {
                     $match: {
                       $expr: {
                         $and: [
-                          {
-                            $eq: [
-                              "$member",
-                              "$$memberId",
-                            ],
-                          },
-
-                          {
-                            $eq: [
-                              "$campaign",
-                              campaign._id,
-                            ],
-                          },
+                          { $eq: ["$member", "$$memberId"] },
+                          { $eq: ["$campaign", campaign._id] },
                         ],
                       },
                     },
                   },
                 ],
-
                 as: "mcp",
               },
             },
-
             {
               $unwind: {
                 path: "$mcp",
-                preserveNullAndEmptyArrays:
-                  true,
+                preserveNullAndEmptyArrays: true,
               },
             },
           ]
         : []),
 
-      /* CATEGORY FROM MCP */
+      // CATEGORY FROM MCP
       {
         $lookup: {
           from: "categories",
-
-          localField:
-            "mcp.pledgedCategory",
-
+          localField: "mcp.pledgedCategory",
           foreignField: "_id",
-
           as: "category",
         },
       },
+      { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
 
-      {
-        $unwind: {
-          path: "$category",
-          preserveNullAndEmptyArrays:
-            true,
-        },
-      },
-
-      /* ===================================================
-         GROUP
-      =================================================== */
-
+      /* =============================
+         GROUPING
+      ============================= */
       {
         $group: {
           _id: groupIdField,
 
-          name: {
-            $first:
-              "$member.name",
-          },
+          name: { $first: "$member.name" },
+          phone: { $first: "$member.phone" },
+          church: { $first: "$church.name" },
 
-          phone: {
-            $first:
-              "$member.phone",
-          },
+          group: { $first: "$group.group_name" },
 
-          church: {
-            $first:
-              "$church.name",
-          },
+          category: { $first: "$category.name" },
+          pledgeAmount: { $first: "$mcp.targetAmount" },
 
-          group: {
-            $first:
-              "$group.group_name",
-          },
-
-          category: {
-            $first:
-              "$category.name",
-          },
-
-          pledgeAmount: {
-            $first:
-              "$mcp.targetAmount",
-          },
-
-          totalAmount: {
-            $sum:
-              "$amount",
-          },
+          totalAmount: { $sum: "$amount" },
 
           monthlyRaw: {
             $push: {
               month: {
                 $dateToString: {
-                  format:
-                    "%Y-%m",
+                  format: "%Y-%m",
                   date: "$date",
                 },
               },
-
-              amount:
-                "$amount",
+              amount: "$amount",
             },
           },
         },
       },
 
-      /* ===================================================
+      /* =============================
          MONTHLY MAP
-      =================================================== */
-
+      ============================= */
       {
         $addFields: {
           monthly: {
@@ -2535,46 +2035,30 @@ export const getHodReport = async (req, res) => {
                   $setUnion: [
                     {
                       $map: {
-                        input:
-                          "$monthlyRaw",
-
+                        input: "$monthlyRaw",
                         as: "m",
-
-                        in:
-                          "$$m.month",
+                        in: "$$m.month",
                       },
                     },
                   ],
                 },
-
                 as: "monthKey",
-
                 in: {
                   k: "$$monthKey",
-
                   v: {
                     $sum: {
                       $map: {
                         input: {
                           $filter: {
-                            input:
-                              "$monthlyRaw",
-
+                            input: "$monthlyRaw",
                             as: "m",
-
                             cond: {
-                              $eq: [
-                                "$$m.month",
-                                "$$monthKey",
-                              ],
+                              $eq: ["$$m.month", "$$monthKey"],  
                             },
                           },
                         },
-
                         as: "x",
-
-                        in:
-                          "$$x.amount",
+                        in: "$$x.amount",
                       },
                     },
                   },
@@ -2585,137 +2069,57 @@ export const getHodReport = async (req, res) => {
         },
       },
 
-      {
-        $project: {
-          monthlyRaw: 0,
-        },
-      },
+      { $project: { monthlyRaw: 0 } },
 
-      {
-        $sort: {
-          totalAmount: -1,
-        },
-      },
-
-      {
-        $skip:
-          (parseInt(page, 10) - 1) *
-          parseInt(limit, 10),
-      },
-
-      {
-        $limit:
-          parseInt(limit, 10),
-      },
+      { $sort: { totalAmount: -1 } },
+      { $skip: (parseInt(page) - 1) * parseInt(limit) },
+      { $limit: parseInt(limit) },
     ];
 
-    const rows =
-      await Giving.aggregate(
-        pipeline
-      );
+    const rows = await Giving.aggregate(pipeline);
 
-    console.log(
-      "📊 Rows:",
-      rows.length
+    console.log("📊 Rows:", rows.length);
+
+    /* =========================================================
+       ALL ROWS
+    ========================================================= */
+    const allRowsPipeline = [...pipeline];
+    allRowsPipeline.pop();
+    allRowsPipeline.pop();
+
+    const allRows = await Giving.aggregate(allRowsPipeline);
+
+    const grandTotal = allRows.reduce(
+      (acc, g) => acc + (g.totalAmount || 0),
+      0
     );
 
-    /* =====================================================
-       ALL ROWS
-    ===================================================== */
-
-    const allRowsPipeline =
-      pipeline.filter(
-        (_, index) =>
-          index !==
-            pipeline.length - 1 &&
-          index !==
-            pipeline.length - 2
-      );
-
-    const allRows =
-      await Giving.aggregate(
-        allRowsPipeline
-      );
-
-    const grandTotal =
-      allRows.reduce(
-        (acc, g) =>
-          acc +
-          (g.totalAmount || 0),
-        0
-      );
-
-    /* =====================================================
+    /* =========================================================
        NORMALIZATION
-    ===================================================== */
-
-    const normalize = (
-      value,
-      defaultValue = "-"
-    ) => {
-      return value ||
-        value === 0
-        ? value
-        : defaultValue;
-    };
+    ========================================================= */
+    const normalize = (v, d = "-") => (v || v === 0 ? v : d);
 
     rows.forEach((r) => {
-      r.name =
-        normalize(
-          r.name,
-          "Unnamed"
-        );
-
-      r.phone =
-        normalize(r.phone);
-
-      r.church =
-        normalize(r.church);
-
-      r.group =
-        normalize(r.group);
-
-      r.category =
-        normalize(
-          r.category,
-          "Uncategorized"
-        );
-
-      r.pledgeAmount =
-        normalize(
-          r.pledgeAmount,
-          0
-        );
+      r.name = normalize(r.name, "Unnamed");
+      r.phone = normalize(r.phone);
+      r.church = normalize(r.church);
+      r.group = normalize(r.group);
+      r.category = normalize(r.category, "Uncategorized");
+      r.pledgeAmount = normalize(r.pledgeAmount, 0);
     });
 
-    console.log(
-      "✅ HOD REPORT READY"
-    );
+    console.log("✅ HOD REPORT READY");
 
     return res.json({
       data: {
         rows,
-
         allRows,
-
         grandTotal,
-
-        meta: {
-          total:
-            allRows.length,
-        },
+        meta: { total: allRows.length },
       },
     });
   } catch (err) {
-    console.error(
-      "❌ HOD REPORT ERROR:",
-      err
-    );
-
-    return res.status(500).json({
-      message:
-        err.message ||
-        "Server error",
-    });
-  }
-};
+    console.error("❌ HOD REPORT ERROR:", err);
+    return res.status(500).json({ message: "Server error" });
+  } 
+};  
