@@ -14,6 +14,7 @@ import {
   searchMembers,
   getUpcomingAnniversaries,
   getMembersByChurch,
+  downloadMembers,
 } from "../controllers/memberController.js";
 
 const router = express.Router();
@@ -92,5 +93,7 @@ router.get(
   ...adminOnly,
   getUpcomingAnniversaries
 );
+
+router.get("/download", downloadMembers);
 
 export default router;

@@ -678,3 +678,300 @@ export const bulkUpdateMembers = async (req, res) => {
     res.status(500).json({ message: "Error updating members" });
   }
 };
+
+
+/* ===============================
+   DOWNLOAD MEMBERS
+================================= */
+export const downloadMembers = async (req, res) => {
+  try {
+    const { type, id, zone } = req.query;
+
+    if (!type) {
+      return res.status(400).json({
+        message: "Download type is required",
+      });
+    }
+
+    let members;
+
+    // =========================
+    // BASE QUERY
+    // =========================
+    let memberQuery = Member.find({
+      deleted: false,
+    })
+      .populate("group", "group_name zoneOrRegion")
+      .populate("church", "name")
+      .populate("hod", "name")
+      .lean();
+
+    // =========================
+    // DOWNLOAD BY GROUP
+    // =========================
+    if (type === "group") {
+      if (!id) {
+        return res.status(400).json({
+          message: "Group ID is required",
+        });
+      }
+
+      memberQuery = Member.find({
+        group: id,
+        deleted: false,
+      })
+        .populate("group", "group_name zoneOrRegion")
+        .populate("church", "name")
+        .populate("hod", "name")
+        .lean();
+    }
+
+    // =========================
+    // DOWNLOAD BY CHURCH
+    // =========================
+    else if (type === "church") {
+      if (!id) {
+        return res.status(400).json({
+          message: "Church ID is required",
+        });
+      }
+
+      memberQuery = Member.find({
+        church: id,
+        deleted: false,
+      })
+        .populate("group", "group_name zoneOrRegion")
+        .populate("church", "name")
+        .populate("hod", "name")
+        .lean();
+    }
+
+    // =========================
+    // DOWNLOAD BY ZONE
+    // =========================
+    else if (type === "zone") {
+      if (!zone) {
+        return res.status(400).json({
+          message: "Zone/Region is required",
+        });
+      }
+
+      // First find all groups belonging to this zone
+      const zoneGroups = await Group.find({
+        zoneOrRegion: zone,
+        isActive: true,
+      }).select("_id group_name zoneOrRegion");
+
+      const groupIds = zoneGroups.map((group) => group._id);
+
+      memberQuery = Member.find({
+        group: { $in: groupIds },
+        deleted: false,
+      })
+        .populate("group", "group_name zoneOrRegion")
+        .populate("church", "name")
+        .populate("hod", "name")
+        .lean();
+    }
+
+    // =========================
+    // INVALID TYPE
+    // =========================
+    else {
+      return res.status(400).json({
+        message: "Invalid download type",
+      });
+    }
+
+    members = await memberQuery;
+
+    // =========================
+    // SORT
+    // Zone → Group → Church → Name
+    // =========================
+    members.sort((a, b) => {
+      const zoneA = a.group?.zoneOrRegion || "Unassigned";
+      const zoneB = b.group?.zoneOrRegion || "Unassigned";
+
+      const groupA = a.group?.group_name || "Unassigned";
+      const groupB = b.group?.group_name || "Unassigned";
+
+      const churchA = a.church?.name || "Unassigned";
+      const churchB = b.church?.name || "Unassigned";
+
+      const nameA = a.name || "";
+      const nameB = b.name || "";
+
+      return (
+        zoneA.localeCompare(zoneB) ||
+        groupA.localeCompare(groupB) ||
+        churchA.localeCompare(churchB) ||
+        nameA.localeCompare(nameB)
+      );
+    });
+
+    // =========================
+    // MEMBER DATA
+    // =========================
+    const memberRows = members.map((member) => ({
+      "Zone / Region": member.group?.zoneOrRegion || "Unassigned",
+      Group: member.group?.group_name || "Unassigned",
+      Church: member.church?.name || "Unassigned",
+      "Member Name": member.name || "",
+      Phone: member.phone || "",
+      Email: member.email || "",
+      Birthday: member.birthday
+        ? new Date(member.birthday).toISOString().split("T")[0]
+        : "",
+      "KingsChat ID": member.kingschatId || "",
+      HOD: member.hod?.name || "",
+    }));
+
+    // =========================
+    // WORKBOOK
+    // =========================
+    const workbook = XLSX.utils.book_new();
+
+    // =========================
+    // MEMBERS SHEET
+    // =========================
+    const membersSheet = XLSX.utils.json_to_sheet(memberRows);
+
+    membersSheet["!cols"] = [
+      { wch: 22 },
+      { wch: 25 },
+      { wch: 30 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 35 },
+      { wch: 15 },
+      { wch: 25 },
+      { wch: 25 },
+    ];
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      membersSheet,
+      "Members"
+    );
+
+    // =========================
+    // SUMMARY
+    // =========================
+    const summaryMap = {};
+
+    members.forEach((member) => {
+      const groupName =
+        member.group?.group_name || "Unassigned";
+
+      const churchName =
+        member.church?.name || "Unassigned";
+
+      const zoneName =
+        member.group?.zoneOrRegion || "Unassigned";
+
+      if (!summaryMap[groupName]) {
+        summaryMap[groupName] = {
+          zone: zoneName,
+          group: groupName,
+          total: 0,
+          churches: {},
+        };
+      }
+
+      summaryMap[groupName].total++;
+
+      if (!summaryMap[groupName].churches[churchName]) {
+        summaryMap[groupName].churches[churchName] = 0;
+      }
+
+      summaryMap[groupName].churches[churchName]++;
+    });
+
+    const summaryRows = [];
+
+    Object.values(summaryMap)
+      .sort((a, b) => a.group.localeCompare(b.group))
+      .forEach((groupData) => {
+        Object.entries(groupData.churches)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .forEach(([churchName, count]) => {
+            summaryRows.push({
+              "Zone / Region": groupData.zone,
+              Group: groupData.group,
+              Church: churchName,
+              "Church Members": count,
+              "Group Total": groupData.total,
+            });
+          });
+      });
+
+    const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+
+    summarySheet["!cols"] = [
+      { wch: 22 },
+      { wch: 25 },
+      { wch: 30 },
+      { wch: 18 },
+      { wch: 18 },
+    ];
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      summarySheet,
+      "Summary"
+    );
+
+    // =========================
+    // FILE NAME
+    // =========================
+    let fileName = "members";
+
+    if (type === "zone") {
+      fileName = `${zone}_members`;
+    }
+
+    if (type === "group") {
+      const group = await Group.findById(id).select("group_name");
+      fileName = `${group?.group_name || "group"}_members`;
+    }
+
+    if (type === "church") {
+      const church = await Church.findById(id).select("name");
+      fileName = `${church?.name || "church"}_members`;
+    }
+
+    // Clean filename
+    fileName = fileName
+      .replace(/[\/\\?%*:|"<>]/g, "-")
+      .replace(/\s+/g, "_");
+
+    // =========================
+    // WRITE EXCEL
+    // =========================
+    const buffer = XLSX.write(workbook, {
+      type: "buffer",
+      bookType: "xlsx",
+    });
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}.xlsx"`
+    );
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+
+    res.send(buffer);
+
+  } catch (err) {
+    console.error("Download members error:", err);
+
+    res.status(500).json({
+      message: "Failed to download members",
+      error: err.message,
+    });
+  }
+};
