@@ -1,103 +1,152 @@
 import express from "express";
+
 import {
-  getCampaigns,
-  createCampaign,
-  updateCampaign,
-  deleteCampaign,
-  getCampaignStats,
-  getCampaignById,
-  getCampaignReport,
-  getCampaignsWithCategories,
-  getCampaignMemberReport,
-  getAdvancedCampaignReport,
-  assignMembersToCampaign,
-  getCampaignParticipation,
-  getChurchMembersByCampaign,
-  getHodDashboard // ✅ NEW
+  create,
+  getAll,
+  getOne,
+  update,
+  activate,
+  close,
+  remove,
+  createCampaignPledge,
+  getPledge,
+  getMemberPledge,
+  getPledges,
+  updateCampaignPledge,
+  removeCampaignPledge,
+  summary,
+  memberReport,
+  churchReport,
+  groupReport,
 } from "../controllers/campaignController.js";
 
-import { requireAuth, requireAdmin } from "../middleware/authMiddleware.js";
+import { requireAuth } from "../middleware/authMiddleware.js";
 
-// ─────────────────────────────────────────────
-// STARTUP LOGS
-// ─────────────────────────────────────────────
-console.log("=================================================================");
-console.log("🚀 campaignRoutes.js LOADED at", new Date().toISOString());
-console.log("Mount point expected: /api/campaigns/*");
-console.log("Registered routes:");
-console.log("  GET    / → getCampaigns");
-console.log("  GET    /with-categories → getCampaignsWithCategories");
-console.log("  GET    /stats → getCampaignStats");
-console.log("  GET    /report/advanced → getAdvancedCampaignReport");
-console.log("  GET    /hod-dashboard → getHodDashboard 🔥 NEW");
-console.log("  GET    /participation/:campaignId → getCampaignParticipation");
-console.log("  GET    /:campaignId/church/:churchId → getChurchMembersByCampaign");
-console.log("  POST   /assign → assignMembersToCampaign");
-console.log("  GET    /:id/members → getCampaignMemberReport");
-console.log("  GET    /:id → getCampaignById");
-console.log("  GET    /:id/report → getCampaignReport");
-console.log("  POST   / → createCampaign (admin)");
-console.log("  PATCH  /:id → updateCampaign (admin)");
-console.log("  DELETE /:id → deleteCampaign (admin)");
-console.log("=================================================================");
+import {
+  requireCampaignAdmin,
+  requireCampaignReadAccess,
+  requireCampaignWriteAccess,
+  requireCampaignArmAccess,
+  requirePledgeArmAccess,
+  applyCampaignArmFilter,
+} from "../middleware/campaignMiddleware.js";
 
 const router = express.Router();
 
-// ─────────────────────────────────────────────
-// GLOBAL REQUEST LOGGER
-// ─────────────────────────────────────────────
-router.use((req, res, next) => {
-  const timestamp = new Date().toISOString();
-  const method = req.method.padEnd(6);
-  const path = req.originalUrl;
-  const userId = req.user ? req.user._id || req.user.id : "anonymous";
-  const bodySize = req.body ? Object.keys(req.body).length : 0;
+router.use(requireAuth);
 
-  console.log(`[${timestamp}] ${method} ${path}`);
-  console.log(`   • User: ${userId}`);
-  console.log(`   • Body keys: ${bodySize}`);
-  if (bodySize > 0 && req.method !== "GET") {
-    console.log(
-      `   • Body sample:`,
-      JSON.stringify(req.body, null, 2).slice(0, 300) +
-        (JSON.stringify(req.body).length > 300 ? "..." : "")
-    );
-  }
-  console.log("───────────────────────────────────────");
+router.post(
+  "/",
+  requireCampaignAdmin,
+  create
+);
 
-  next();
-});
+router.get(
+  "/",
+  requireCampaignReadAccess,
+  applyCampaignArmFilter,
+  getAll
+);
 
-// ─────────────────────────────────────────────
-// ROUTES
-// ─────────────────────────────────────────────
+router.get(
+  "/:campaignId",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  getOne
+);
 
-// ✅ STATIC ROUTES FIRST
-router.get("/", requireAuth, getCampaigns);
-router.get("/with-categories", requireAuth, getCampaignsWithCategories);
-router.get("/stats", requireAuth, getCampaignStats);
+router.patch(
+  "/:campaignId",
+  requireCampaignAdmin,
+  update
+);
 
-// 🔥 HOD DASHBOARD (AUTO-SCOPED — NO CAMPAIGN SELECTOR)
-router.get("/hod-dashboard", requireAuth, getHodDashboard);
+router.patch(
+  "/:campaignId/activate",
+  requireCampaignAdmin,
+  activate
+);
 
-// ✅ ADVANCED REPORT (manual access if needed)
-router.get("/report/advanced", requireAuth, getAdvancedCampaignReport);
+router.patch(
+  "/:campaignId/close",
+  requireCampaignAdmin,
+  close
+);
 
-// OTHER SPECIFIC ROUTES
-router.get("/participation/:campaignId", requireAuth, getCampaignParticipation);
-router.get("/:campaignId/church/:churchId", requireAuth, getChurchMembersByCampaign);
-router.post("/assign", requireAuth, requireAdmin, assignMembersToCampaign);
+router.delete(
+  "/:campaignId",
+  requireCampaignAdmin,
+  remove
+);
 
-// 👇 STILL SAFE (more specific than :id)
-router.get("/:id/members", requireAuth, getCampaignMemberReport);
+router.post(
+  "/:campaignId/pledges",
+  requireCampaignWriteAccess,
+  requireCampaignArmAccess,
+  createCampaignPledge
+);
 
-// ❗ ALWAYS LAST (dynamic routes)
-router.get("/:id", requireAuth, getCampaignById);
-router.get("/:id/report", requireAuth, getCampaignReport);
+router.get(
+  "/:campaignId/pledges",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  getPledges
+);
 
-// ADMIN
-router.post("/", requireAuth, requireAdmin, createCampaign);
-router.patch("/:id", requireAuth, requireAdmin, updateCampaign);
-router.delete("/:id", requireAuth, requireAdmin, deleteCampaign);
+router.get(
+  "/:campaignId/pledges/member/:memberId",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  getMemberPledge
+);
+
+router.get(
+  "/pledges/:pledgeId",
+  requireCampaignReadAccess,
+  requirePledgeArmAccess,
+  getPledge
+);
+
+router.patch(
+  "/pledges/:pledgeId",
+  requireCampaignWriteAccess,
+  requirePledgeArmAccess,
+  updateCampaignPledge
+);
+
+router.delete(
+  "/pledges/:pledgeId",
+  requireCampaignWriteAccess,
+  requirePledgeArmAccess,
+  removeCampaignPledge
+);
+
+router.get(
+  "/:campaignId/reports/summary",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  summary
+);
+
+router.get(
+  "/:campaignId/reports/members",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  memberReport
+);
+
+router.get(
+  "/:campaignId/reports/churches",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  churchReport
+);
+
+router.get(
+  "/:campaignId/reports/groups",
+  requireCampaignReadAccess,
+  requireCampaignArmAccess,
+  groupReport
+);
 
 export default router;

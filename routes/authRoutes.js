@@ -17,7 +17,9 @@ router.get(
   requireAuth,
   requireRole(["admin"]),
   (req, res) => {
-    res.json({ message: "Welcome Admin Dashboard" });
+    res.json({
+      message: "Welcome Admin Dashboard",
+    });
   }
 );
 
@@ -26,16 +28,38 @@ router.get(
   requireAuth,
   requireRole(["viewer"]),
   (req, res) => {
-    res.json({ message: "Welcome Viewer Dashboard" });
+    res.json({
+      message: "Welcome Viewer Dashboard",
+    });
   }
 );
 
 router.get(
   "/hod/dashboard",
   requireAuth,
-  requireRole(["healing_hod", "rhapsody_hod", "ministry_hod", "bibles_hod", "innercity_hod", "lwpm_hod"]),
+  requireRole([
+    "healing_hod",
+    "rhapsody_hod",
+    "ministry_hod",
+    "bibles_hod",
+    "innercity_hod",
+    "lwpm_hod",
+  ]),
   (req, res) => {
-    res.json({ message: "Welcome HOD Dashboard" });
+    res.json({
+      message: "Welcome HOD Dashboard",
+    });
+  }
+);
+
+router.get(
+  "/faculty/dashboard",
+  requireAuth,
+  requireRole(["head_of_faculty"]),
+  (req, res) => {
+    res.json({
+      message: "Welcome Head of Faculty Dashboard",
+    });
   }
 );
 

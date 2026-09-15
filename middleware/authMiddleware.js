@@ -59,3 +59,7 @@ export const requireRole = (roles = []) => {
  * Shortcut for admin-only routes
  */
 export const requireAdmin = requireRole(["admin"]);
+
+export const requireHeadOfFaculty = requireRole([
+  "head_of_faculty",
+]);

@@ -31,6 +31,7 @@ const memberSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
@@ -51,6 +52,7 @@ const memberSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+
     isActive: {
       type: Boolean,
       default: true,
@@ -78,9 +80,7 @@ const memberSchema = new mongoose.Schema(
   }
 );
 
-
 memberSchema.index({ church: 1, deleted: 1 });
-
 memberSchema.index({ group: 1, deleted: 1 });
 
 memberSchema.index({
@@ -93,12 +93,6 @@ memberSchema.index({
 memberSchema.index({
   deleted: 1,
   isActive: 1,
-});
-
-memberSchema.virtual("participations", {
-  ref: "MemberCampaignParticipation",
-  localField: "_id",
-  foreignField: "member",
 });
 
 export default mongoose.models.Member ||

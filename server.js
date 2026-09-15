@@ -17,6 +17,7 @@ import groupRoutes from "./routes/groupRoutes.js";
 import memberRoutes from "./routes/memberRoutes.js";
 import givingRoutes from "./routes/givingRoutes.js";
 import hodRoutes from "./routes/hodRoutes.js";
+import facultyRoutes from "./routes/facultyRoutes.js";
 import marriageRoutes from "./routes/marriageRoutes.js";
 import campaignGivingsRoutes from "./routes/campaignGivings.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
@@ -24,9 +25,11 @@ import categoryRoutes from "./routes/categoryRoutes.js";
 import ministryYearRoutes from "./routes/ministryYearRoutes.js";
 
 dotenv.config();
+
 connectDB();
 
 const app = express();
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -39,16 +42,29 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true); 
+      if (!origin) {
+        return callback(null, true);
+      }
+
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
-      } else {
-        console.warn("🚫 Blocked by CORS:", origin);
-        return callback(new Error("Not allowed by CORS"));
       }
+
+      console.warn("🚫 Blocked by CORS:", origin);
+      return callback(new Error("Not allowed by CORS"));
     },
-    methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: [
+      "GET",
+      "POST",
+      "PATCH",
+      "PUT",
+      "DELETE",
+      "OPTIONS",
+    ],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+    ],
     credentials: true,
   })
 );
@@ -58,18 +74,59 @@ app.use(morgan("dev"));
 
 const contributionSchema = new mongoose.Schema(
   {
-    fullName: { type: String, required: true },
-    church: { type: String, required: true },
-    partnershipArm: { type: String, required: true },
-    amount: { type: Number, required: true },
-    date: { type: Date, required: true },
+    fullName: {
+      type: String,
+      required: true,
+    },
+    church: {
+      type: String,
+      required: true,
+    },
+    partnershipArm: {
+      type: String,
+      required: true,
+    },
+    amount: {
+      type: Number,
+      required: true,
+    },
+    date: {
+      type: Date,
+      required: true,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
-contributionSchema.index({ fullName: 1, partnershipArm: 1, date: 1 }, { unique: true });
-const Contribution = mongoose.model("Contribution", contributionSchema);
+
+contributionSchema.index(
+  {
+    fullName: 1,
+    partnershipArm: 1,
+    date: 1,
+  },
+  {
+    unique: true,
+  }
+);
+
+const Contribution =
+  mongoose.models.Contribution ||
+  mongoose.model(
+    "Contribution",
+    contributionSchema
+  );
 
 app.use("/api/auth", authRoutes);
+
+app.get("/api/auth/test", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "Auth routes are mounted correctly",
+  });
+});
+
 app.use("/api/partners", partnershipRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/users", userRoutes);
@@ -78,72 +135,165 @@ app.use("/api/groups", groupRoutes);
 app.use("/api/members", memberRoutes);
 app.use("/api/givings", givingRoutes);
 app.use("/api/hod", hodRoutes);
+app.use("/api/faculty", facultyRoutes);
 app.use("/api/marriages", marriageRoutes);
 app.use("/api/admin/marriages", marriageRoutes);
 app.use("/api/admin/members", memberRoutes);
-app.use("/api/campaignGivings", campaignGivingsRoutes);
-app.use("/api/campaigns", campaignRoutes);
-app.use("/api/categories", categoryRoutes);
-app.use("/api/ministry-years", ministryYearRoutes);
 
+app.use(
+  "/api/campaignGivings",
+  campaignGivingsRoutes
+);
+
+app.use(
+  "/api/campaigns",
+  campaignRoutes
+);
+
+app.use(
+  "/api/categories",
+  categoryRoutes
+);
+
+app.use(
+  "/api/ministry-years",
+  ministryYearRoutes
+);
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-app.post("/api/partners/upload", upload.single("file"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+app.post(
+  "/api/partners/upload",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          message: "No file uploaded",
+        });
+      }
 
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet);
+      const workbook = XLSX.read(
+        req.file.buffer,
+        {
+          type: "buffer",
+        }
+      );
 
-    const dateCols = Object.keys(rows[0] || {}).filter((col) =>
-      /\d{4}-\d{2}-\d{2}/.test(col)
-    );
-    const data = [];
+      const sheet =
+        workbook.Sheets[
+          workbook.SheetNames[0]
+        ];
 
-    for (const row of rows) {
-      for (const date of dateCols) {
-        const amount = Number(row[date] || 0);
-        if (amount > 0) {
-          data.push({
-            fullName: row.fullName,
-            church: row.church,
-            partnershipArm: row.partnershipArm,
-            amount,
-            date: new Date(date),
-          });
+      const rows =
+        XLSX.utils.sheet_to_json(sheet);
+
+      const dateCols = Object.keys(
+        rows[0] || {}
+      ).filter((col) =>
+        /\d{4}-\d{2}-\d{2}/.test(col)
+      );
+
+      const data = [];
+
+      for (const row of rows) {
+        for (const date of dateCols) {
+          const amount = Number(
+            row[date] || 0
+          );
+
+          if (amount > 0) {
+            data.push({
+              fullName: row.fullName,
+              church: row.church,
+              partnershipArm:
+                row.partnershipArm,
+              amount,
+              date: new Date(date),
+            });
+          }
         }
       }
-    }
 
-    const promises = data.map(async (item) => {
-      const exists = await Contribution.findOne({
-        fullName: item.fullName,
-        partnershipArm: item.partnershipArm,
-        date: item.date,
+      const promises = data.map(
+        async (item) => {
+          const exists =
+            await Contribution.findOne({
+              fullName: item.fullName,
+              partnershipArm:
+                item.partnershipArm,
+              date: item.date,
+            });
+
+          if (!exists) {
+            return Contribution.create(
+              item
+            );
+          }
+
+          return null;
+        }
+      );
+
+      await Promise.all(promises);
+
+      return res.json({
+        message: "Upload successful ✅",
+        count: data.length,
       });
-      if (!exists) return Contribution.create(item);
-    });
+    } catch (err) {
+      console.error(
+        "💥 Upload Error:",
+        err
+      );
 
-    await Promise.all(promises);
-
-    res.json({ message: "Upload successful ✅", count: data.length });
-  } catch (err) {
-    console.error("💥 Upload Error:", err);
-    res.status(500).json({ message: "Server error during upload" });
+      return res.status(500).json({
+        message:
+          "Server error during upload",
+      });
+    }
   }
+);
+
+app.get("/", (req, res) => {
+  res.json({
+    message:
+      "🚀 CRM Backend API running successfully!",
+  });
 });
 
-app.get("/", (req, res) => res.json({ message: "🚀 CRM Backend API running successfully!" }));
-
-app.use((req, res, next) => res.status(404).json({ message: "Route not found" }));
+app.use((req, res) => {
+  res.status(404).json({
+    message: "Route not found",
+  });
+});
 
 app.use((err, req, res, next) => {
-  console.error("💥 Global Error:", err.message);
-  res.status(500).json({ message: err.message || "Internal Server Error" });
+  console.error(
+    "💥 Global Error:",
+    err.message
+  );
+
+  res.status(500).json({
+    message:
+      err.message ||
+      "Internal Server Error",
+  });
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(
+    `✅ Server running on port ${PORT}`
+  );
+
+  console.log(
+    "🔐 Auth login endpoint: POST /api/auth/login"
+  );
+
+  console.log(
+    "🧪 Auth test endpoint: GET /api/auth/test"
+  );
+});

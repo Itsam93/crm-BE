@@ -8,7 +8,6 @@ const groupSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Total active members across all churches in this group
     totalMembers: {
       type: Number,
       default: 0,
@@ -23,7 +22,7 @@ const groupSchema = new mongoose.Schema(
     pastor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Member",
-      default: "Null",
+      default: null,
     },
 
     isActive: {
@@ -45,37 +44,34 @@ const groupSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    toJSON: { virtuals: true },    // include virtuals in JSON output
-    toObject: { virtuals: true },
+
+    toJSON: {
+      virtuals: true,
+    },
+
+    toObject: {
+      virtuals: true,
+    },
   }
 );
 
-// ────────────────────────────────────────────────────────────────
-// Indexes ────────────────────────────────────────────────────────
-groupSchema.index({ group_name: "text" });           // text search
-groupSchema.index({ isActive: 1 });                  // filter active groups
-groupSchema.index({ totalMembers: -1 });             // sort by size
-groupSchema.index({ totalGiving: -1 });              // sort by giving
-groupSchema.index({ zoneOrRegion: 1 });              // regional filtering
+groupSchema.index({ group_name: "text" });
+groupSchema.index({ isActive: 1 });
+groupSchema.index({ totalMembers: -1 });
+groupSchema.index({ totalGiving: -1 });
+groupSchema.index({ zoneOrRegion: 1 });
 
-// ────────────────────────────────────────────────────────────────
-// Virtuals ───────────────────────────────────────────────────────
 groupSchema.virtual("churches", {
   ref: "Church",
   localField: "_id",
   foreignField: "group",
-  match: { isActive: true },     // only active churches
+  match: {
+    isActive: true,
+  },
 });
 
-// ────────────────────────────────────────────────────────────────
-// Post-save hook: recalculate totalMembers from churches (safety net)
-// ────────────────────────────────────────────────────────────────
-groupSchema.post("save", async function (doc) {
-  // Optional: you can trigger recalculation here if needed
-  // But since Church already updates group on save, this is redundant unless bulk operations
-});
-
-// Prevent overwrite error
-const Group = mongoose.models.Group || mongoose.model("Group", groupSchema);
+const Group =
+  mongoose.models.Group ||
+  mongoose.model("Group", groupSchema);
 
 export default Group;

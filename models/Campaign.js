@@ -1,61 +1,160 @@
 import mongoose from "mongoose";
 
+const CAMPAIGN_ARMS = [
+  "Rhapsody",
+  "Healing School",
+  "Ministry Programs",
+  "Innercity Missions",
+  "Loveworld Bibles",
+  "LWPM",
+];
+
 const campaignSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      required: [true, "Campaign name is required"],
       trim: true,
+      maxlength: 200,
     },
 
     description: {
       type: String,
+      trim: true,
       default: "",
-    },
-
-    startDate: {
-      type: Date,
-      required: true,
-    },
-
-    endDate: {
-      type: Date,
-      required: true,
+      maxlength: 1000,
     },
 
     arm: {
       type: String,
-      enum: [
-        "Partnership",
-        "Rhapsody",
-        "Healing School",
-        "Ministry Programs",
-        "Innercity Missions",
-        "Loveworld Bibles",
-        "LWPM",
-      ],
-      required: true,
+      enum: CAMPAIGN_ARMS,
+      required: [true, "Partnership arm is required"],
+      index: true,
     },
 
-    active: {
-      type: Boolean,
-      default: true,
+    startDate: {
+      type: Date,
+      required: [true, "Campaign start date is required"],
+      index: true,
     },
 
-    deleted: {
-      type: Boolean,
-      default: false,
+    endDate: {
+      type: Date,
+      default: null,
+      index: true,
     },
 
-    // Campaign → Categories relationship
-    categories: [
+    status: {
+      type: String,
+      enum: ["draft", "active", "closed"],
+      default: "draft",
+      index: true,
+    },
+
+    customFields: [
       {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Category",
+        key: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+
+        label: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+
+        type: {
+          type: String,
+          enum: [
+            "text",
+            "number",
+            "date",
+            "select",
+            "textarea",
+          ],
+          default: "text",
+        },
+
+        options: {
+          type: [String],
+          default: [],
+        },
+
+        required: {
+          type: Boolean,
+          default: false,
+        },
+
+        order: {
+          type: Number,
+          default: 0,
+        },
       },
     ],
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: [true, "Campaign creator is required"],
+      index: true,
+    },
+
+    closedAt: {
+      type: Date,
+      default: null,
+    },
+
+    closedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-export default mongoose.model("Campaign", campaignSchema);
+campaignSchema.index({
+  arm: 1,
+  status: 1,
+});
+
+campaignSchema.index({
+  startDate: 1,
+  endDate: 1,
+});
+
+campaignSchema.index({
+  createdBy: 1,
+  createdAt: -1,
+});
+
+campaignSchema.pre("validate", function (next) {
+  if (!Array.isArray(this.customFields)) {
+    return next();
+  }
+
+  const keys = new Set();
+
+  for (const field of this.customFields) {
+    if (keys.has(field.key)) {
+      return next(
+        new Error(
+          `Duplicate custom field key: ${field.key}`
+        )
+      );
+    }
+
+    keys.add(field.key);
+  }
+
+  next();
+});
+
+export { CAMPAIGN_ARMS };
+
+export default mongoose.models.Campaign ||
+  mongoose.model("Campaign", campaignSchema);

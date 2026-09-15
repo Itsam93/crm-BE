@@ -1,5 +1,13 @@
-// models/Giving.js
 import mongoose from "mongoose";
+
+const GIVING_ARMS = [
+  "Rhapsody",
+  "Healing School",
+  "Ministry Programs",
+  "Innercity Missions",
+  "Loveworld Bibles",
+  "LWPM",
+];
 
 const givingSchema = new mongoose.Schema(
   {
@@ -7,16 +15,21 @@ const givingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Member",
       required: true,
+      index: true,
     },
 
     church: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Church",
+      default: null,
+      index: true,
     },
 
     group: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Group",
+      default: null,
+      index: true,
     },
 
     amount: {
@@ -28,24 +41,20 @@ const givingSchema = new mongoose.Schema(
     date: {
       type: Date,
       default: Date.now,
+      index: true,
     },
 
     arm: {
       type: String,
-      enum: [
-        "Rhapsody",
-        "Healing School",
-        "Ministry Programs",
-        "Innercity Missions",
-        "Loveworld Bibles",
-        "LWPM",
-      ],
+      enum: GIVING_ARMS,
       required: true,
+      index: true,
     },
 
     deleted: {
       type: Boolean,
       default: false,
+      index: true,
     },
 
     ministryYear: {
@@ -65,6 +74,7 @@ const givingSchema = new mongoose.Schema(
     category: {
       type: String,
       default: null,
+      trim: true,
     },
   },
   {
@@ -72,9 +82,40 @@ const givingSchema = new mongoose.Schema(
   }
 );
 
-givingSchema.index({ ministryYear: 1, arm: 1 });
-givingSchema.index({ ministryYear: 1, campaign: 1 });
-givingSchema.index({ member: 1, ministryYear: 1 });
-givingSchema.index({ date: 1 });
+givingSchema.index({
+  ministryYear: 1,
+  arm: 1,
+});
 
-export default mongoose.model("Giving", givingSchema);
+givingSchema.index({
+  ministryYear: 1,
+  campaign: 1,
+});
+
+givingSchema.index({
+  member: 1,
+  ministryYear: 1,
+});
+
+givingSchema.index({
+  member: 1,
+  arm: 1,
+  date: 1,
+});
+
+givingSchema.index({
+  church: 1,
+  arm: 1,
+  date: 1,
+});
+
+givingSchema.index({
+  group: 1,
+  arm: 1,
+  date: 1,
+});
+
+export { GIVING_ARMS };
+
+export default mongoose.models.Giving ||
+  mongoose.model("Giving", givingSchema);
