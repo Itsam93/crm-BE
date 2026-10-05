@@ -36,7 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  process.env.VITE_FRONTEND_URL || "https://crm-new-nilr.vercel.app",
+  process.env.VITE_FRONTEND_URL || "https://crm-new-orpin.vercel.app",
 ];
 
 app.use(
